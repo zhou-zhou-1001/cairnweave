@@ -1,30 +1,34 @@
 # Agent Integrity Guard
 
-## 给自己的 Agent：先复制这段指令
+## 给自己的 Agent：可迁移的接入资产
 
-你不需要手写集成。把下面完整的 **AGENT TASK / INTEGRATION RECIPE** 复制给你的 Coding Agent 或通用 Agent，让它在你的项目目录中自行完成评估、接入和验证。建议从最小接入层开始；只有确实需要跨 agent 的追加记录或争议处理时，再升级层级。
+下面是唯一的 canonical **AGENT TASK / INTEGRATION RECIPE**。复制给 Coding Agent 或通用 Agent，让它先发现、再获授权、最后实施和验证；不要把本页后面的示例当成另一份 Recipe。
 
 ```text
 AGENT TASK / INTEGRATION RECIPE — Agent Integrity Guard
 
-目标：把 agent-integrity-guard 接入当前用户项目，用它显式保留 agent 输出、顺序和（需要时）争议状态；不要把它当成自动运行的守护进程。
+资产版本与边界：适用于 agent-integrity-guard >=0.1.0 <0.2.0、Node.js >=18。安装前必须读取将实际安装版本的 package.json、README、根导出和 API 签名；版本范围不是代替检查 API 的承诺。本库是由宿主主动调用的进程内 CommonJS 库，不是常驻 daemon；不提供 persistence、network transport、authentication、authorization、signatures 或 security boundary。
 
-执行前提与边界：
-1. 先检查当前项目类型、package.json/锁文件、现有测试命令、模块系统（CommonJS/ESM）和 Node.js 版本；本包要求 Node.js 18+，并优先遵循项目现有约定。
-2. 阅读 agent-integrity-guard 的 README 和 API（至少确认 relayExternalResult、ResultStore、MemoryPassport、loadBaseContext 的实际签名），不要猜 API。
-3. 只在用户项目目录内修改；不要改本包源码、全局配置或其他目录，不要联网，不要引入未经用户要求的依赖或服务。
+目标：按宿主需求选择最小接入层，显式保留 agent 输出及可选的顺序、claim 历史和争议状态。
 
-选择最短接入路径（从上到下逐级增加能力）：
-4. 仅 relay（默认起点）：将外部结果交给 relayExternalResult({ agentId, result, ... })；只转发上游明确提供的 url/model，绝不推断 provenance。
-5. relay + ResultStore：若需要本进程内按 agent 追加、按全局 sequence 读取的结果记录，再 append 每个 relayed result；不要宣称它提供持久化或跨进程共享。
-6. 完整 MemoryPassport：若需要可复核的 claim 历史和争议流程，再用稳定 memoryId 创建 passport，source 指向 result sequence，并按 dispute/resolve 状态机处理；没有实际需求不要选这一层。
+1. DISCOVERY（只读，先完成）：定位项目根目录和 package.json；识别 npm/pnpm/yarn/bun、对应锁文件、CJS/ESM、实际 Node 版本、现有 test/lint/typecheck/build 命令，以及宿主已有的 canonical agent identity schema。检查工作树是否有未提交修改，并确认依赖在既有约束下可用。若 Node <18、没有合适包管理器、依赖不可用或项目状态无法判断，停止并报告，不猜测、不安装、不修改。
+2. AUTHORIZATION（明确确认门）：先向用户列出拟采用的接入层、将修改的文件和命令，并等待明确授权。安装依赖、修改 package.json/锁文件、修改任何生产路径或引入 identity 映射，每一类都必须在授权范围内。宿主若有未提交修改，先记录/保护它们，只改必要文件；不得覆盖或回滚用户原有修改。
+3. IDENTITY：复用宿主已有 canonical agent identity。若不存在，提出稳定 ID 方案、映射位置和迁移影响，等待确认后再实现。agentId 只是调用方提供的标签，未经本库认证，不能据此断言真实身份。
+4. LEVEL（按需求选择，不要求逐层全接）：
+   A. 仅 relay：用 relayExternalResult 忠实转发 agentId/result，以及上游明确提供的 url/model。
+   B. relay + ResultStore：需要本 ResultStore 实例内追加和读取时才使用。sequence 是该实例内的全局追加序号，不跨进程、也不跨实例。
+   C. 完整 MemoryPassport：只有需要 claim 历史和 dispute/resolve 流程时使用稳定 memoryId。source.resultSequence 只是调用方的显式 provenance 声明；本库不验证被引用结果是否真实存在。
+   loadBaseContext 是独立可选能力，仅在宿主确需统一加载基础上下文时接入，不能因选择 A/B/C 而默认强接。
+5. IMPORT（按宿主模块系统采用准确的最小形式）：
+   CommonJS: const { relayExternalResult } = require('agent-integrity-guard');
+   ESM: import { createRequire } from 'node:module'; const require = createRequire(import.meta.url); const { relayExternalResult } = require('agent-integrity-guard');
+   调用示例：relayExternalResult({ agentId, result, ...(url !== undefined ? { url } : {}), ...(model !== undefined ? { model } : {}) }); 不推断或伪造 identity、model、URL 或 source。
+6. CHANGE：在宿主现有入口/适配层做最小改动，保留其模块系统、错误处理和业务语义。开始前记录目标文件原内容或基线 git diff；持续记录本次实际改动文件。
+7. VERIFICATION / STOP：运行宿主已有 test、lint、typecheck 和 build（存在者），再运行与所选层级匹配的最小 smoke test。验证 relay 字段；若使用 store，验证实例内 sequence/read；若使用 passport，验证 history/status。任一步失败，记录命令、输出和影响，停止并报告；不要擅自扩依赖、改生产设计或扩大文件范围。
+8. ROLLBACK：生成可审查的 git diff。只撤回本次接入所改内容，不触碰用户先前修改；向用户给出逐文件、可审查的回滚命令或反向补丁，但不自动执行，不使用 git reset --hard、宽泛 checkout 或其他破坏性 reset。
+9. REPORT（固定格式）：discovery、authorization、changes、verification、rollback、limitations。limitations 必须说明所选层级、未验证项、进程内状态，以及本库不提供 persistence/network/auth/signatures/security boundary。
 
-实现与验证：
-7. 用项目已有的入口/适配层接入，保持现有模块系统和错误处理；不改变业务语义，不伪造 agent 身份、模型、URL 或来源。
-8. 运行项目已有测试和相关 lint/typecheck/example；若没有测试，至少运行一个最小真实调用或等价 smoke test，并检查结果、sequence、history/status（按所选层级）。
-9. 汇报：改了哪些用户项目文件、采用哪一接入层、运行了哪些命令及结果、未完成项/风险；明确说明 state 仅进程内（若适用），且本库不提供 persistence、network transport、authentication、authorization、signatures 或 security boundary。
-
-完成标准：接入可运行、验证结果可复现、未知 provenance 保持未知；如果前提不满足或需要用户决定，先报告阻塞点，不擅自扩大改动范围。
+完成标准：授权范围内的最小接入可运行、验证可复现、未知 provenance 保持未知、回滚范围清楚。任何前提或授权不足时，以报告结束而不是猜测。
 ```
 
 ### Agent 接入后到底做什么
@@ -34,7 +38,7 @@ AGENT TASK / INTEGRATION RECIPE — Agent Integrity Guard
 ### 三种接入层级
 
 1. **仅 relay**：只做诚实转发，适合先验证边界和 provenance。
-2. **relay + ResultStore**：在当前进程追加并按 agent/全局顺序读取结果。
+2. **relay + ResultStore**：在当前实例追加，并按 agent 或该实例的全局追加序号读取结果。
 3. **完整 MemoryPassport**：在前两层之上，为需要复核的 claim 管理来源、历史和 dispute/resolve 状态机。
 
 从最小层开始，按实际需求升级；三层都不提供持久化、网络、认证或安全隔离。
@@ -48,17 +52,17 @@ Agent Integrity Guard is a zero-dependency, in-memory CommonJS toolkit for handi
 - a memory passport with an explicit dispute state machine;
 - a context loader that makes every supported prompt mode load the same base files.
 
-It is a correctness layer, not a security boundary or database. It deliberately has no persistence, network transport, authentication, authorization, signatures, or cross-process locking.
+It is a correctness layer, not a security boundary or database. It deliberately has no persistence, network transport, authentication, authorization, signatures, or cross-process locking. An `agentId` is caller-supplied and unauthenticated.
 
 ## Shortest path
 
-Requires Node.js 18 or newer.
+Requires Node.js 18 or newer. Run this only after the canonical Recipe's discovery and authorization gates, using the host project's selected package manager:
 
 ```sh
 npm install agent-integrity-guard
 ```
 
-Give every agent a stable ID. Relay its output, append that output, then create a passport only for claims whose history matters:
+Reuse the host's canonical agent ID. If none exists, obtain approval for a stable ID scheme first. Relay output, append it only if ordering is needed, and create a passport only for claims whose history matters:
 
 ```js
 const { MemoryPassport, ResultStore, relayExternalResult } = require('agent-integrity-guard');
@@ -81,7 +85,7 @@ passports.create({
 });
 ```
 
-That is the complete adoption path. All state is process-local. Returned objects are defensive copies, so callers cannot mutate stored history.
+This example shows the full tier; relay-only and relay-plus-store are valid smaller choices. All state is process-local. Returned objects are defensive copies, so callers cannot mutate stored history.
 
 ## Copy-paste patterns
 
@@ -111,10 +115,10 @@ store.append('planner', { kind: 'plan', text: 'Inspect first' });
 store.append('reviewer', { kind: 'review', text: 'Evidence missing' });
 
 store.readAgent('planner'); // this agent's events, in append order
-store.readAll();            // all events, in global sequence order
+store.readAll();            // all events, in this store instance's sequence order
 ```
 
-`append()` never replaces an event. A failed clone does not consume a sequence number. Values must be supported by Node's `structuredClone`.
+`append()` never replaces an event. Its sequence is global only within that `ResultStore` instance, not across instances or processes. A failed clone does not consume a sequence number. Values must be supported by Node's `structuredClone`.
 
 ### Track a claim and its provenance
 
@@ -141,7 +145,7 @@ passport.timeline('claim-42');       // safe structured summary
 passport.formatTimeline('claim-42'); // one-line-per-event report
 ```
 
-Provenance is explicit per content change. If an update or replacement content has no `source`, the current view has no source; the library never carries an old source forward as if it supported new content.
+Provenance is explicit per content change. `source.resultSequence` is a caller-supplied provenance declaration; the library does not verify that the referenced result exists. If an update or replacement content has no `source`, the current view has no source; the library never carries an old source forward as if it supported new content.
 
 ### Dispute and adjudicate
 
@@ -191,7 +195,7 @@ Limitations: no authenticated identity; state exists only in this process
 
 If a dispute is still open, say so prominently and report both the current claim and the dispute reason. Do not describe disputed content as settled. Use `formatTimeline()` for a compact audit handoff; it collapses untrusted whitespace and omits arbitrary content/source values. Use `history()` only where the receiver is meant to inspect full payloads.
 
-## Context completeness
+## Optional context completeness
 
 If an agent runner has several prompt modes, inject its own file reader and load the same base context in each:
 
@@ -207,28 +211,9 @@ const context = await loadBaseContext({
 
 Every supported mode requests `AGENTS.md`, `SOUL.md`, and `USER.md` in that order. Reading is injected because filesystem location and missing-file policy belong to the host application.
 
-## Self-contained agent recipe
+## Canonical agent recipe
 
-Inspired by EvoMap-style transferable instructions, the block below can be pasted into another agent's task. It requires only Node.js 18+ and this package.
-
-```text
-INTEGRITY RECIPE
-1. Use CommonJS: require('agent-integrity-guard').
-2. Assign each producer a stable, non-empty agentId.
-3. Pass external output through relayExternalResult({ agentId, result, ...explicitProvenance }).
-   Include url/model only when the upstream value is explicit. Never infer them.
-4. Append every relayed result to one ResultStore. Keep the returned global sequence.
-5. For a claim that may be reused, create one MemoryPassport record whose source points
-   to that result sequence. Use a stable memoryId.
-6. Never mutate old records. Call update for new content, dispute for conflicting evidence,
-   and resolve only after review with an explicit adjudicator, reason, and decision.
-7. Treat current().status === 'disputed' as unresolved. A resolved claim must be reopened
-   with dispute before it can change.
-8. In the final report include: claim, producer agentId, explicit source (or "not supplied"),
-   memoryId/sequence/status, open dispute or resolution, and limitations.
-9. Do not claim persistence, authentication, authorization, signatures, or network safety.
-10. Hand off formatTimeline(memoryId) plus any authorized full result separately.
-```
+Use the **AGENT TASK / INTEGRATION RECIPE** at the beginning of this README. It is the sole transferable recipe; the examples below document APIs but do not weaken its discovery, authorization, verification, rollback, identity, or reporting requirements.
 
 ## API reference
 
