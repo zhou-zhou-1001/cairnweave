@@ -1,0 +1,35 @@
+{
+  "name": "agent-integrity-guard",
+  "version": "0.1.0",
+  "description": "Small dependency-free primitives for trustworthy multi-agent coordination.",
+  "main": "index.js",
+  "type": "commonjs",
+  "exports": "./index.js",
+  "files": [
+    "index.js",
+    "context-loader.js",
+    "memory-passport.js",
+    "relay.js",
+    "result-store.js",
+    "examples/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "example": "node examples/basic.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "agents",
+    "audit-trail",
+    "provenance",
+    "state-machine"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT"
+}
