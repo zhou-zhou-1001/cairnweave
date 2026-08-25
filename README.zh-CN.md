@@ -104,9 +104,9 @@ passport.update('claim-42', {
   content: { claim: 'Service is degraded' },
   source: { resultSequence: 3, check: 'health probe' }
 });
-passport.dispute('claim-42', {
-  actorAgentId: 'reviewer', reason: 'Probe conflicts with incident log',
-  source: { resultSequence: 4 }
+passport.requestReview('claim-42', {
+  actorAgentId: 'reviewer', reason: '例行独立复核',
+  source: { resultSequence: 4, check: '将健康探针与原始指标对照' }
 });
 passport.resolve('claim-42', {
   adjudicatorAgentId: 'lead-reviewer', reason: 'Checked raw metrics',
@@ -119,7 +119,27 @@ passport.timeline('claim-42');
 passport.formatTimeline('claim-42');
 ```
 
-状态机为 `active -> disputed -> resolved`；resolved memory 必须先再次 dispute 才能改变内容。更新不会关闭争议，history 保留每个事件。`source.resultSequence` 是调用方声明且未验证的 provenance；新内容没有 source 时，旧 source 不会被冒充为新来源。
+状态机为 `active -> disputed -> resolved`；`requestReview()` 与 `dispute()` 都会进入等待裁决的 `disputed` 状态。例行独立复核使用 `requestReview()`：它记录 `review` 事件，并强制提供显式且非 null 的 `source` 证据。`dispute()` 继续兼容冲突争议及旧版未带 `source` 的调用，但强烈建议争议也附证据。resolved memory 必须先再次 review 或 dispute 才能改变内容。更新不会关闭已打开的复核/争议，history 保留每个事件。`source.resultSequence` 是调用方声明且未验证的 provenance；新内容没有 source 时，旧 source 不会被冒充为新来源。
+
+遇到冲突 claim 时，应使用 `dispute()` 代替 `requestReview()`；同一时间只能打开一个复核或争议。
+
+## 本地 EvoMap 资产验证
+
+直接用 Node 运行零依赖验证器。JSON 资产包必须包含 `payload.assets`；工具只读取 `Gene` 上的 validation，绝不会退回读取 `Capsule`。为避免执行任意 shell 内容，目前仅接受 `bash -n <相对文件>` 形式，并直接调用 Bash、不经过 shell 中间层。目标文件相对资产包定位，且不能逃逸该目录。
+
+```sh
+node bin/guard-asset-verify.js /path/to/bundle.json
+```
+
+输出是结构化 JSON，包含两个 ResultStore 事件、逐项检查、Passport 的 `create -> review -> resolve` 生命周期与时间线。所有声明检查通过时退出码为 `0`；校验失败、输入格式错误或不支持的声明均以非零退出码结束。
+
+## 对接 Memory Palace 的设计（本次未实现）
+
+- 每个 Passport 事件对应 `memory_events` 的一行 append-only 记录：`event_id`、`memory_id`、memory 内 `seq`、`event_type`、`actor_agent_id`、`timestamp` 和规范化后的 `payload`。投影当前状态时，`review` 与 `dispute` 都映射到等待裁决状态。
+- 将 `payload.source` provenance 与已认证身份分开：它是调用方声明的证据，不是身份证明。保留完整 JSON，同时可索引 `resultSequence`、artifact ID 与检查类型。
+- 增加 `prev_hash` 和 `event_hash`，基于带版本号的规范序列化和不可变行字段计算。对 `(memory_id, seq)` 与 `event_id` 设唯一约束；追加与预期前序 hash 检查必须处于同一事务，防止并发分叉。
+- 当前状态由事件日志重放得到，snapshot 仅作可丢弃投影。按 `event_id` 幂等导入；遇到序号缺口、hash 不匹配、非法转换，或没有开放 review/dispute 就 resolve 时拒绝写入。
+- 明确信任边界：Memory Palace 持久化与 hash chain 只能提供篡改可见性，不能认证 actor。签名、密钥管理、授权、跨库排序和现有内存历史迁移，都需要在生产接入前另定协议。
 
 ### 可选 context loader
 

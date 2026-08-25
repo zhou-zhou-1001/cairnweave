@@ -64,6 +64,24 @@ class MemoryPassport {
     return this.#append(memoryId, 'dispute', actorAgentId, payload);
   }
 
+  requestReview(memoryId, { actorAgentId, reason, source } = {}) {
+    this.#requireMemory(memoryId);
+    requireNonEmptyString(actorAgentId, 'actorAgentId');
+    requireNonEmptyString(reason, 'reason');
+    const options = arguments[1] || {};
+    if (!Object.hasOwn(options, 'source') || source === undefined || source === null) {
+      throw new TypeError('source is required as independent review evidence');
+    }
+    if (this.current(memoryId).status === 'disputed') {
+      throw new Error('memory already has an open dispute or review');
+    }
+
+    return this.#append(memoryId, 'review', actorAgentId, {
+      reason,
+      source: copy(source)
+    });
+  }
+
   resolve(memoryId, { adjudicatorAgentId, reason, decision, content, source } = {}) {
     this.#requireMemory(memoryId);
     requireNonEmptyString(adjudicatorAgentId, 'adjudicatorAgentId');
@@ -104,8 +122,10 @@ class MemoryPassport {
       } else if (event.eventType === 'update') {
         entry.summary = 'Updated memory content';
         entry.contentChanged = true;
-      } else if (event.eventType === 'dispute') {
+      } else if (event.eventType === 'dispute' || event.eventType === 'review') {
+        const isReview = event.eventType === 'review';
         entry.summary = status === 'resolved' ? 'Reopened dispute' : 'Opened dispute';
+        if (isReview) entry.summary = status === 'resolved' ? 'Requested review again' : 'Requested review';
         entry.reason = event.payload.reason;
         status = 'disputed';
       } else if (event.eventType === 'resolve') {
@@ -151,9 +171,15 @@ class MemoryPassport {
         state.content = copy(event.payload.content);
         if (Object.hasOwn(event.payload, 'source')) state.source = copy(event.payload.source);
         else delete state.source;
-      } else if (event.eventType === 'dispute') {
+      } else if (event.eventType === 'dispute' || event.eventType === 'review') {
         state.status = 'disputed';
-        state.disputeReason = event.payload.reason;
+        if (event.eventType === 'review') {
+          state.reviewReason = event.payload.reason;
+          delete state.disputeReason;
+        } else {
+          state.disputeReason = event.payload.reason;
+          delete state.reviewReason;
+        }
         delete state.resolution;
       } else if (event.eventType === 'resolve') {
         state.status = 'resolved';
@@ -163,6 +189,7 @@ class MemoryPassport {
           decision: event.payload.decision
         };
         delete state.disputeReason;
+        delete state.reviewReason;
         if (Object.hasOwn(event.payload, 'content')) {
           state.content = copy(event.payload.content);
           if (!Object.hasOwn(event.payload, 'source')) delete state.source;

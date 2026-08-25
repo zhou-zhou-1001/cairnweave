@@ -104,9 +104,9 @@ passport.update('claim-42', {
   content: { claim: 'Service is degraded' },
   source: { resultSequence: 3, check: 'health probe' }
 });
-passport.dispute('claim-42', {
-  actorAgentId: 'reviewer', reason: 'Probe conflicts with incident log',
-  source: { resultSequence: 4 }
+passport.requestReview('claim-42', {
+  actorAgentId: 'reviewer', reason: 'Routine independent verification',
+  source: { resultSequence: 4, check: 'compared health probe with raw metrics' }
 });
 passport.resolve('claim-42', {
   adjudicatorAgentId: 'lead-reviewer', reason: 'Checked raw metrics',
@@ -119,7 +119,27 @@ passport.timeline('claim-42');
 passport.formatTimeline('claim-42');
 ```
 
-The state machine is `active -> disputed -> resolved`; a resolved memory must be disputed again before content changes. Updates do not close a dispute, and history retains every event. `source.resultSequence` is caller-declared and unverified. If new content has no source, an old source is not carried forward.
+The state machine is `active -> disputed -> resolved`; both `requestReview()` and `dispute()` open the pending-adjudication (`disputed`) state. Use `requestReview()` for routine independent verification: it records a `review` event and requires an explicit, non-null `source` as evidence. `dispute()` remains backward compatible for conflict reports, including older calls without `source`, though evidence-bearing disputes are strongly recommended. A resolved memory must be reviewed or disputed again before content changes. Updates do not close an open review/dispute, and history retains every event. `source.resultSequence` is caller-declared and unverified. If new content has no source, an old source is not carried forward.
+
+For a conflicting claim, call `dispute()` instead of `requestReview()`; only one review or dispute may be open at a time.
+
+## Local EvoMap asset verification
+
+Run the dependency-free verifier directly with Node. The JSON bundle must contain `payload.assets`; validation is read only from a `Gene`, never from a `Capsule`. For safety, the tool currently accepts only declarations shaped as `bash -n <relative-file>` and executes Bash directly without a shell intermediary. Referenced files are resolved relative to the bundle and may not escape that directory.
+
+```sh
+node bin/guard-asset-verify.js /path/to/bundle.json
+```
+
+It prints structured JSON containing the two ResultStore events, individual checks, the Passport `create -> review -> resolve` lifecycle, and its timeline. Exit code `0` means every declared check passed; validation failure, malformed input, or an unsupported declaration exits non-zero.
+
+## Memory Palace integration design (not implemented)
+
+- Persist each Passport event as one append-only `memory_events` row: `event_id`, `memory_id`, per-memory `seq`, `event_type`, `actor_agent_id`, `timestamp`, and canonicalized `payload`. Map both `review` and `dispute` to the pending-adjudication state when projecting current memory state.
+- Store provenance from `payload.source` separately from authenticated identity: it is caller-declared evidence, not proof. Preserve the complete JSON while optionally indexing `resultSequence`, artifact identifiers, and check type.
+- Add `prev_hash` and `event_hash`, computed from a versioned canonical serialization of immutable row fields. Enforce unique `(memory_id, seq)` and `event_id`; append and expected previous hash must be checked in one transaction to prevent concurrent forks.
+- Rebuild current state from the event log and treat snapshots as disposable projections. Ingestion should be idempotent by `event_id`; imports must reject sequence gaps, hash mismatches, illegal transitions, and `resolve` without an open `review`/`dispute`.
+- Keep trust boundaries explicit: Memory Palace persistence and hash chaining provide tamper evidence, not actor authentication. Signing, key management, authorization, cross-store ordering, and migration of existing in-memory histories need separate protocols before production integration.
 
 ### Optional context loader
 

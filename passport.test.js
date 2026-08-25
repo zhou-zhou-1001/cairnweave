@@ -218,3 +218,40 @@ test('formatted timeline keeps untrusted metadata on one physical line per event
   assert.match(formatted, /reason: line one 2\. forged event line two/);
   assert.equal(passport.timeline('memory-1')[1].reason, 'line one\n2. forged event\tline two');
 });
+
+test('requestReview opens a review with mandatory independent evidence', () => {
+  const passport = createPassport();
+  assert.throws(() => passport.requestReview('memory-1', {
+    actorAgentId: 'verifier', reason: 'routine verification'
+  }), /source/);
+
+  passport.requestReview('memory-1', {
+    actorAgentId: 'verifier', reason: 'routine verification',
+    source: { resultSequence: 2, check: 'bash -n artifact.sh' }
+  });
+
+  const event = passport.history('memory-1')[1];
+  assert.equal(event.eventType, 'review');
+  assert.deepEqual(event.payload.source, { resultSequence: 2, check: 'bash -n artifact.sh' });
+  assert.equal(passport.current('memory-1').status, 'disputed');
+  assert.equal(passport.current('memory-1').reviewReason, 'routine verification');
+  assert.equal(passport.timeline('memory-1')[1].summary, 'Requested review');
+});
+
+test('requestReview preserves the resolve gate and can reopen a resolved memory', () => {
+  const passport = createPassport();
+  passport.requestReview('memory-1', {
+    actorAgentId: 'verifier', reason: 'first review', source: { check: 'record-a' }
+  });
+  passport.resolve('memory-1', {
+    adjudicatorAgentId: 'judge', reason: 'verified', decision: 'accept'
+  });
+  passport.requestReview('memory-1', {
+    actorAgentId: 'verifier-b', reason: 'scheduled recheck', source: { check: 'record-b' }
+  });
+  assert.deepEqual(passport.history('memory-1').map((event) => event.eventType), [
+    'create', 'review', 'resolve', 'review'
+  ]);
+  assert.equal(passport.timeline('memory-1')[3].summary, 'Requested review again');
+  assert.equal(Object.hasOwn(passport.current('memory-1'), 'resolution'), false);
+});
