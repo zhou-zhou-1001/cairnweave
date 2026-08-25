@@ -29,6 +29,17 @@ VERSION AND BOUNDARY: For agent-integrity-guard >=0.1.0 <0.2.0 and Node.js >=18.
 DONE means: the approved minimal integration runs, verification is reproducible, unknown provenance remains unknown, and rollback scope is clear. If a prerequisite or approval is missing, end with a report rather than guessing.
 ```
 
+## Guarded Codex task runner / 受控 Codex 任务运行器
+
+`bin/guard-codex-task.js` has two separate phases. `run` executes Codex, captures repository status and verification evidence, and writes an artifact that remains `reviewRequired: true`. A reviewer must then independently run `resolve` with a decision and reason; the runner does not auto-accept Codex's work. Child processes use `shell: false`, so commands and arguments are passed directly rather than interpreted by a shell.
+
+`bin/guard-codex-task.js` 分为两个独立阶段。`run` 执行 Codex、记录仓库状态与验证证据，并写出仍标记为 `reviewRequired: true` 的 artifact。随后必须由 reviewer 独立执行 `resolve`，明确给出 decision 和 reason；该工具不会自动接受 Codex 的工作。子进程使用 `shell: false`，命令及参数会被直接传递，不经过 shell 解释。
+
+```sh
+node bin/guard-codex-task.js run . task-1 "Update the docs" task-1.guard.json
+node bin/guard-codex-task.js resolve task-1.guard.json accepted "Reviewed the diff and tests"
+```
+
 ## Canonical Agent Recipe（唯一接入配方）
 
 把下面的配方复制给 Coding Agent。后文示例只是 API 文档，不是第二份相互独立的 Recipe。

@@ -12,8 +12,10 @@ test('package entry point exposes the complete public API', () => {
     'BASE_CONTEXT_FILES',
     'MemoryPassport',
     'ResultStore',
+    'captureCodexTask',
     'loadBaseContext',
-    'relayExternalResult'
+    'relayExternalResult',
+    'resolveCapturedTask'
   ]);
 });
 
