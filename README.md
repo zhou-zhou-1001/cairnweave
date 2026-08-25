@@ -1,180 +1,82 @@
 # Agent Integrity Guard
 
-> **Coding Agent entry:** Read https://github.com/zhou-zhou-1001/agent-integrity-guard and integrate the smallest suitable layer into this project. Ask before changing dependencies or production paths. Run tests and report changes, verification, rollback, and limitations.
+> **Coding Agent entry:** Integrate the smallest suitable layer from this repository. Ask before changing dependencies or production paths, then test and report changes, verification, rollback, and limitations. See the [complete integration recipe](docs/AGENT_INTEGRATION.md).
 >
 > 中文版：[README.zh-CN.md](README.zh-CN.md)
 
-The sentence above is an entry point, not an authorization bypass. An agent must still inspect the actual host `package.json`, module system, package API, and user approval before making changes. This repository is a transferable integration asset, not a skill package; do not use `npx skills add` to install it.
+A zero-dependency, in-process CommonJS toolkit that adds explicit producer labels, ordering, claim history, and adjudication status to agent result handoffs.
 
-## Canonical agent recipe
+## Features
 
-Copy this recipe to a Coding Agent. It is the one canonical integration recipe; the examples later are API documentation, not a second recipe.
+- **Zero dependencies:** Node.js 18+ with no runtime packages.
+- **In-process and side-effect free:** no daemon, network, persistence, authentication, or hidden I/O.
+- **Progressive primitives:** adopt Relay, `ResultStore`, or `MemoryPassport` only as needed.
+- **Explicit provenance:** unknown identity, model, URL, and source remain unknown.
+- **Defensive history:** cloned values, append-only records, and controlled review/dispute transitions.
 
-```text
-AGENT TASK / INTEGRATION RECIPE — Agent Integrity Guard
-
-VERSION AND BOUNDARY: For agent-integrity-guard >=0.1.0 <0.2.0 and Node.js >=18. Before installation, read the package.json, README, root exports, and actual API signatures for the version that will really be used. A version range never replaces API inspection. This is a dependency-free, in-process CommonJS library actively called by the host; it is not a daemon and provides no persistence, network transport, authentication, authorization, signatures, or security boundary.
-
-1. DISCOVERY (read-only first): Find the project root and package.json. Identify the package manager and lockfile, CJS/ESM mode, actual Node version, existing test/lint/typecheck/build commands, and the host's canonical agent-identity schema. Inspect uncommitted work and confirm that the dependency is compatible with existing constraints. If Node is below 18, the package manager is unclear, the dependency is unavailable, or the project state cannot be determined: stop and report; do not guess, install, or edit.
-2. AUTHORIZATION GATE: Before editing, tell the user the proposed layer, files, and commands, then wait for explicit approval. Installing a dependency, changing package.json/lockfiles, changing production paths, and adding an identity mapping each require approval within scope. Preserve existing uncommitted work and edit only what is necessary.
-3. IDENTITY: Reuse the host's canonical agent identity. If none exists, propose a stable ID, mapping location, and migration impact and wait for approval. agentId is a caller-supplied label; it is not authenticated by this library and cannot prove real identity.
-4. CHOOSE THE SMALLEST LAYER (do not force all three):
-   A. RELAY ONLY: call relayExternalResult to faithfully forward agentId/result and upstream-supplied url/model.
-   B. RELAY + RESULTSTORE: add ResultStore only when this ResultStore instance needs append/read ordering. sequence is global only inside that instance, never across instances or processes.
-   C. MEMORYPASSPORT: add MemoryPassport only when claim history and dispute/resolve workflow are needed. Use a stable memoryId. source.resultSequence is an explicit caller provenance declaration; this library does not verify that the referenced result exists.
-   loadBaseContext is independent and optional; use it only when the host needs one base-context loader, never automatically because A/B/C was selected.
-5. IMPORT (use the host's real module system; do not guess):
-   CommonJS: const { relayExternalResult } = require('agent-integrity-guard');
-   ESM: import { createRequire } from 'node:module'; const require = createRequire(import.meta.url); const { relayExternalResult } = require('agent-integrity-guard');
-   Example: relayExternalResult({ agentId, result, ...(url !== undefined ? { url } : {}), ...(model !== undefined ? { model } : {}) }); Never invent identity, model, URL, or source.
-6. CHANGE: Make the smallest edit in the host's existing entry/adapter layer. Preserve its module system, errors, and business semantics. Record the baseline (for example, a scoped git diff or copies of target files) and track every file changed by this integration.
-7. VERIFICATION / STOP: Run the host's existing test, lint, typecheck, and build commands when present, then a smallest smoke test for the selected layer. Verify relay fields; for ResultStore verify instance-local sequence/read; for MemoryPassport verify history/status. On any failure, record command, output, and impact, stop, and report. Do not widen dependencies, production design, or file scope.
-8. ROLLBACK: Produce a reviewable git diff. Revert only this integration's changes, never the user's earlier work. Give per-file rollback commands or a reverse patch for review, but do not execute it automatically and never use git reset --hard, broad checkout, or destructive reset.
-9. REPORT (fixed headings): discovery, authorization, changes, verification, rollback, limitations. Limitations must name the selected layer, unverified items, process-local state, and the absence of persistence, network, authentication, authorization, signatures, and security boundary.
-
-DONE means: the approved minimal integration runs, verification is reproducible, unknown provenance remains unknown, and rollback scope is clear. If a prerequisite or approval is missing, end with a report rather than guessing.
-```
-
-## What this library is
-
-Agent Integrity Guard is a zero-dependency, in-memory CommonJS toolkit for a host agent to hand off results while retaining explicit producer labels, instance-local order, claim history, and dispute status. It is actively called by the host process: it does not listen, sync, schedule, persist, authenticate, authorize, sign, or transmit anything. `agentId` is caller-supplied and unauthenticated. This is a correctness layer, not a database or security boundary.
-
-The design is informed by patterns seen in EvoMap-style quickstarts, agent skills, and Evolver documentation, but this library is independent and makes no affiliation or compatibility claim.
-
-## Installation and shortest path
-
-Requires Node.js 18+. After the recipe's discovery and authorization gates, use the host project's package manager:
+## Installation
 
 ```sh
 npm install agent-integrity-guard
 ```
 
-The package is CommonJS (`package.json` has `"type": "commonjs"`). It has no runtime dependencies. For an ESM host, use the accurate bridge shown in the recipe rather than assuming a named ESM export.
-
-Start at the smallest layer:
-
-1. **Relay only** — honest forwarding of explicitly supplied fields.
-2. **Relay + `ResultStore`** — append/read events in one store instance.
-3. **`MemoryPassport`** — claim history plus dispute/resolve state machine.
-
-`loadBaseContext` is a separate optional capability, not a fourth required layer.
-
-## API examples
-
-### Relay
+## 30-second start
 
 ```js
 const { relayExternalResult } = require('agent-integrity-guard');
-
 const relayed = relayExternalResult({
-  agentId: response.agentId,
-  result: response.output,
-  ...(response.url !== undefined ? { url: response.url } : {}),
-  ...(response.model !== undefined ? { model: response.model } : {})
+  agentId: response.agentId, result: response.output, url: response.url
 });
 ```
 
-`agentId` and `result` must be own properties. `url` and `model` are optional own properties. Unknown and inherited fields are ignored; no identity or source is inferred.
+Only explicitly supplied fields are forwarded; the library never invents identity or provenance.
+
+## Choose the smallest layer
+
+### Relay
+
+Faithfully forwards `agentId`, `result`, and optional `url`/`model` when a handoff only needs honest field preservation.
+
+```js
+relayExternalResult({ agentId: 'planner', result: { ok: true } });
+```
 
 ### ResultStore
 
-```js
-const { ResultStore } = require('agent-integrity-guard');
-const store = new ResultStore();
-store.append('planner', { kind: 'plan', text: 'Inspect first' });
-store.append('reviewer', { kind: 'review', text: 'Evidence missing' });
-store.readAgent('planner');
-store.readAll();
-```
+Adds append/read ordering within one store instance. Sequence numbers do not span instances or processes.
 
-`append()` is append-only and returns defensive copies. Its sequence is global only within this store instance, not across instances or processes. Values must be supported by Node `structuredClone`; a failed clone does not consume a sequence number.
+```js
+new ResultStore().append('planner', { kind: 'plan' });
+```
 
 ### MemoryPassport
 
-```js
-const { MemoryPassport } = require('agent-integrity-guard');
-const passport = new MemoryPassport();
-passport.create({
-  memoryId: 'claim-42', actorAgentId: 'observer',
-  content: { claim: 'Service is healthy' },
-  source: { resultSequence: 1, check: 'health probe' }
-});
-passport.update('claim-42', {
-  actorAgentId: 'observer',
-  content: { claim: 'Service is degraded' },
-  source: { resultSequence: 3, check: 'health probe' }
-});
-passport.requestReview('claim-42', {
-  actorAgentId: 'reviewer', reason: 'Routine independent verification',
-  source: { resultSequence: 4, check: 'compared health probe with raw metrics' }
-});
-passport.resolve('claim-42', {
-  adjudicatorAgentId: 'lead-reviewer', reason: 'Checked raw metrics',
-  decision: 'replace', content: { claim: 'Service had a partial outage' },
-  source: { resultSequence: 5 }
-});
-passport.current('claim-42');
-passport.history('claim-42');
-passport.timeline('claim-42');
-passport.formatTimeline('claim-42');
-```
-
-The state machine is `active -> disputed -> resolved`; both `requestReview()` and `dispute()` open the pending-adjudication (`disputed`) state. Use `requestReview()` for routine independent verification: it records a `review` event and requires an explicit, non-null `source` as evidence. `dispute()` remains backward compatible for conflict reports, including older calls without `source`, though evidence-bearing disputes are strongly recommended. A resolved memory must be reviewed or disputed again before content changes. Updates do not close an open review/dispute, and history retains every event. `source.resultSequence` is caller-declared and unverified. If new content has no source, an old source is not carried forward.
-
-For a conflicting claim, call `dispute()` instead of `requestReview()`; only one review or dispute may be open at a time.
-
-## Local EvoMap asset verification
-
-Run the dependency-free verifier directly with Node. The JSON bundle must contain `payload.assets`; validation is read only from a `Gene`, never from a `Capsule`. For safety, the tool currently accepts only declarations shaped as `bash -n <relative-file>` and executes Bash directly without a shell intermediary. Referenced files are resolved relative to the bundle and may not escape that directory.
-
-```sh
-node bin/guard-asset-verify.js /path/to/bundle.json
-```
-
-It prints structured JSON containing the two ResultStore events, individual checks, the Passport `create -> review -> resolve` lifecycle, and its timeline. Exit code `0` means every declared check passed; validation failure, malformed input, or an unsupported declaration exits non-zero.
-
-## Memory Palace integration design (not implemented)
-
-- Persist each Passport event as one append-only `memory_events` row: `event_id`, `memory_id`, per-memory `seq`, `event_type`, `actor_agent_id`, `timestamp`, and canonicalized `payload`. Map both `review` and `dispute` to the pending-adjudication state when projecting current memory state.
-- Store provenance from `payload.source` separately from authenticated identity: it is caller-declared evidence, not proof. Preserve the complete JSON while optionally indexing `resultSequence`, artifact identifiers, and check type.
-- Add `prev_hash` and `event_hash`, computed from a versioned canonical serialization of immutable row fields. Enforce unique `(memory_id, seq)` and `event_id`; append and expected previous hash must be checked in one transaction to prevent concurrent forks.
-- Rebuild current state from the event log and treat snapshots as disposable projections. Ingestion should be idempotent by `event_id`; imports must reject sequence gaps, hash mismatches, illegal transitions, and `resolve` without an open `review`/`dispute`.
-- Keep trust boundaries explicit: Memory Palace persistence and hash chaining provide tamper evidence, not actor authentication. Signing, key management, authorization, cross-store ordering, and migration of existing in-memory histories need separate protocols before production integration.
-
-### Optional context loader
+Tracks claim content, caller-declared source, complete history, and review/dispute lifecycle under a stable `memoryId`.
 
 ```js
-const fs = require('node:fs/promises');
-const { loadBaseContext } = require('agent-integrity-guard');
-const context = await loadBaseContext({
-  promptMode: 'worker',
-  readFile: (filename) => fs.readFile(filename, 'utf8')
-});
+new MemoryPassport().create({ memoryId: 'claim-1', actorAgentId: 'observer', content: { ok: true } });
 ```
 
-Supported modes are `default`, `compact`, and `worker`; each requests `AGENTS.md`, `SOUL.md`, and `USER.md` in that order. The host supplies file reading and missing-file policy.
+The state machine is `active -> disputed -> resolved`; both `requestReview()` and `dispute()` enter `disputed`.
 
-## Agent handoff and limitations
+## Coding agent integration
 
-Report observation, provenance, and review status separately. Never fill an unknown URL, model, identity, or source with a plausible value. A useful fixed handoff is:
+This library is designed for coding agents as well as direct application use. Agents should inspect the host, request authorization, choose the smallest layer, verify the integration, and provide a scoped rollback. Copy the [canonical recipe and handoff format](docs/AGENT_INTEGRATION.md).
 
-```text
-discovery: ...
-authorization: ...
-changes: ...
-verification: ...
-rollback: ...
-limitations: selected layer; unverified provenance; process-local state; no persistence, network, authentication, authorization, signatures, or security boundary
-```
+## Tools and design notes
 
-## API reference and development
+- **API and context loader:** detailed examples, event semantics, source rules, and optional `loadBaseContext` usage are in [docs/API.md](docs/API.md).
+- **Asset verifier:** the local CLI validates supported Gene declarations with strict path and command boundaries; see [docs/ASSET_VERIFY.md](docs/ASSET_VERIFY.md).
+- **Memory Palace:** the proposed append-only persistence and hash-chain design is in [docs/MEMORY_PALACE.md](docs/MEMORY_PALACE.md).
 
-Root exports are `BASE_CONTEXT_FILES`, `loadBaseContext`, `MemoryPassport`, `relayExternalResult`, and `ResultStore`. See [`examples/basic.js`](examples/basic.js) for a runnable flow.
+## Development
 
 ```sh
 npm test
 npm run example
 ```
+
+See [`examples/basic.js`](examples/basic.js) for a runnable flow.
 
 ## License
 
