@@ -1,8 +1,24 @@
 # API Reference / API 参考
 
-Agent Integrity Guard is a dependency-free, in-process CommonJS correctness layer. It does not persist, transmit, authenticate, authorize, or sign data. Root exports are `BASE_CONTEXT_FILES`, `loadBaseContext`, `MemoryPassport`, `relayExternalResult`, and `ResultStore`.
+Agent Integrity Guard is a dependency-free, in-process CommonJS correctness layer. It does not persist, transmit, authenticate, authorize, or sign data. Root exports also include the generic task APIs `captureAgentTask`, `captureCommandTask`, and `resolveCapturedTask`; `captureCodexTask` is retained for compatibility.
 
-Agent Integrity Guard 是零依赖、进程内的 CommonJS 正确性层。它不持久化、传输、认证、授权或签名数据。根导出为 `BASE_CONTEXT_FILES`、`loadBaseContext`、`MemoryPassport`、`relayExternalResult` 和 `ResultStore`。
+Agent Integrity Guard 是零依赖、进程内的 CommonJS 正确性层。它不持久化、传输、认证、授权或签名数据。根导出还包括通用任务 API `captureAgentTask`、`captureCommandTask`、`resolveCapturedTask`；`captureCodexTask` 继续作为兼容 API。
+
+### Guarded task capture
+
+`captureAgentTask()` injects an agent-neutral `run` function. Generic artifacts use schema `agent-integrity-guard/agent-task`, runner identity `agent-task-runner`, memory IDs prefixed with `agent-task-`, and `process.agent`. `captureCommandTask()` runs a command with `shell: false`, passes the prompt on stdin, and returns the same artifact shape. `resolveCapturedTask()` accepts both generic artifacts and legacy Codex artifacts so existing review lifecycles remain valid.
+
+```js
+const { captureCommandTask } = require('agent-integrity-guard');
+const artifact = await captureCommandTask({
+  cwd: process.cwd(), taskId: 'task-1', prompt: 'input',
+  command: 'my-agent', args: ['--json'], agentId: 'my-agent'
+});
+```
+
+### 通用受控任务捕获
+
+`captureAgentTask()` 注入 Agent 中立的 `run` 函数。通用 artifact 使用 schema `agent-integrity-guard/agent-task`、runner identity `agent-task-runner`、`agent-task-` 前缀 memory ID 与 `process.agent`。`captureCommandTask()` 以 `shell: false` 执行命令，并通过 stdin 传入 prompt。`resolveCapturedTask()` 同时接受通用 artifact 和旧 Codex artifact，确保既有 review 生命周期可继续使用。
 
 ## API examples
 

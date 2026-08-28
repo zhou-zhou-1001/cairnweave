@@ -11,7 +11,10 @@
     "memory-passport.js",
     "relay.js",
     "result-store.js",
+    "artifact-store.js",
+    "core/",
     "bin/",
+    "docs/",
     "examples/",
     "README.md",
     "LICENSE"

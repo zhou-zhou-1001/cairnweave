@@ -13,6 +13,7 @@ A zero-dependency, in-process CommonJS toolkit that adds explicit producer label
 - **Progressive primitives:** adopt Relay, `ResultStore`, or `MemoryPassport` only as needed.
 - **Explicit provenance:** unknown identity, model, URL, and source remain unknown.
 - **Defensive history:** cloned values, append-only records, and controlled review/dispute transitions.
+- **Agent-neutral task capture:** a generic core and command adapter, with the existing Codex entry retained as a compatibility adapter.
 
 ## Installation
 
@@ -62,6 +63,8 @@ The state machine is `active -> disputed -> resolved`; both `requestReview()` an
 ## Coding agent integration
 
 This library is designed for coding agents as well as direct application use. Agents should inspect the host, request authorization, choose the smallest layer, verify the integration, and provide a scoped rollback. Copy the [canonical recipe and handoff format](docs/AGENT_INTEGRATION.md).
+
+The generic API is `captureAgentTask({ agentId, run, ... })`; `captureCommandTask({ command, args, ... })` supplies a dependency-free command adapter. The CLI equivalent is `bin/guard-agent-task.js`. Existing `captureCodexTask()` and `bin/guard-codex-task.js` behavior remain available for compatibility.
 
 ## Tools and design notes
 

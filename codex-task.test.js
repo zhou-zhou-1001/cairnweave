@@ -6,7 +6,9 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { captureCodexTask, resolveCapturedTask } = require('./bin/guard-codex-task');
+const { captureAgentTask, captureCodexTask, resolveCapturedTask } = require('./bin/guard-codex-task');
+const { captureCommandTask, parseRunArguments, writeArtifact } = require('./bin/guard-agent-task');
+const { loadArtifact, saveArtifact } = require('./artifact-store');
 
 function command(cwd, executable, args) {
   const result = spawnSync(executable, args, { cwd, encoding: 'utf8', shell: false });
@@ -40,8 +42,34 @@ async function fixture(reviewAgentId = 'reviewer') {
   return { repository, artifactPath, artifact };
 }
 
+async function changingFixture(allowedPaths, commandText) {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'guard-codex-scope-'));
+  const repository = path.join(directory, 'repository');
+  const fakeBin = path.join(directory, 'bin');
+  await fs.mkdir(repository);
+  await fs.mkdir(fakeBin);
+  command(repository, 'git', ['init', '-q']);
+  command(repository, 'git', ['config', 'user.email', 'test@example.invalid']);
+  command(repository, 'git', ['config', 'user.name', 'Test']);
+  await fs.writeFile(path.join(repository, 'allowed.txt'), 'baseline\n');
+  command(repository, 'git', ['add', 'allowed.txt']);
+  command(repository, 'git', ['commit', '-qm', 'baseline']);
+  const codexPath = path.join(fakeBin, 'codex');
+  await fs.writeFile(codexPath, `#!/bin/sh\n${commandText}\n`, { mode: 0o755 });
+  const originalPath = process.env.PATH;
+  process.env.PATH = `${fakeBin}${path.delimiter}${originalPath}`;
+  try {
+    return await captureCodexTask({ cwd: repository, taskId: 'scope-task', prompt: 'change files', test: false, allowedPaths });
+  } finally {
+    process.env.PATH = originalPath;
+  }
+}
+
 test('run records runner verification and a request without a fake reviewer event', { concurrency: false }, async () => {
   const { artifact } = await fixture();
+  assert.equal(artifact.schema, 'agent-integrity-guard/codex-task');
+  assert.match(artifact.passport.memoryId, /^codex-task-/);
+  assert.equal(Object.hasOwn(artifact.process, 'codex'), true);
   assert.deepEqual(artifact.passport.history.map((event) => event.eventType), ['create']);
   assert.equal(artifact.passport.history.some((event) => event.actorAgentId === 'reviewer'), false);
   assert.deepEqual(artifact.resultStore.map((event) => [event.agentId, event.event.kind]), [
@@ -97,4 +125,115 @@ test('runner and reviewer identities cannot be the task agent', { concurrency: f
   await assert.rejects(fixture('codex'), /reviewAgentId must be independent/);
   const { artifactPath, artifact } = await fixture();
   await assert.rejects(resolveCapturedTask({ artifactPath, decision: 'accepted', adjudicatorAgentId: artifact.passport.history[0].actorAgentId, reason: 'checked' }), /adjudicatorAgentId must be independent/);
+});
+
+test('scope violations block review and record changed paths', { concurrency: false }, async () => {
+  const artifact = await changingFixture(['allowed.txt'], 'printf changed > forbidden.txt');
+  assert.equal(artifact.task.status, 'scope_violation');
+  assert.equal(artifact.review.required, false);
+  assert.deepEqual(artifact.scope.allowedPaths, ['allowed.txt']);
+  assert.deepEqual(artifact.scope.violations, ['forbidden.txt']);
+  await assert.rejects(
+    resolveCapturedTask({ artifactPath: path.join(os.tmpdir(), 'missing-artifact.json'), decision: 'accepted', reason: 'checked' }),
+    /ENOENT/
+  );
+});
+
+test('failed Codex execution is not reviewable', { concurrency: false }, async () => {
+  const artifact = await changingFixture(undefined, 'exit 7');
+  assert.equal(artifact.task.status, 'execution_failed');
+  assert.equal(artifact.review.required, false);
+});
+
+test('generic agent adapters use the same guard lifecycle', { concurrency: false }, async () => {
+  const { repository } = await fixture();
+  const artifact = await captureAgentTask({
+    cwd: repository,
+    taskId: 'generic-task',
+    prompt: 'do nothing',
+    agentId: 'claude-code',
+    test: false,
+    run: async () => ({ code: 0, signal: null, stdout: 'ok', stderr: '' })
+  });
+  assert.equal(artifact.task.status, 'awaiting_review');
+  assert.equal(artifact.resultStore[0].agentId, 'claude-code');
+  assert.equal(artifact.resultStore[0].event.kind, 'agent_handoff');
+  assert.equal(artifact.passport.history[0].actorAgentId, 'claude-code');
+  assert.equal(artifact.schema, 'agent-integrity-guard/agent-task');
+  assert.match(artifact.passport.memoryId, /^agent-task-/);
+  assert.deepEqual(artifact.resultStore.slice(1).map((event) => event.agentId), ['agent-task-runner', 'agent-task-runner']);
+  assert.equal(artifact.process.agent.stdout, 'ok');
+  assert.equal(Object.hasOwn(artifact.process, 'codex'), false);
+});
+
+test('generic command adapter executes without Codex-specific artifact fields', { concurrency: false }, async () => {
+  const { repository } = await fixture();
+  const artifact = await captureCommandTask({
+    cwd: repository, taskId: 'command-task', prompt: 'stdin payload', command: process.execPath,
+    args: ['-e', 'process.stdin.pipe(process.stdout)'], agentId: 'local-command', test: false
+  });
+  assert.equal(artifact.task.status, 'awaiting_review');
+  assert.equal(artifact.process.agent.stdout, 'stdin payload');
+  assert.equal(artifact.resultStore[0].agentId, 'local-command');
+  assert.equal(artifact.resultStore[1].event.checks.agentExit, true);
+});
+
+test('generic CLI parsing keeps command flags separate from runner options', () => {
+  assert.deepEqual(parseRunArguments([
+    '.', 'task', 'prompt', '--output=nested/task.json', '--allow=docs', '--', 'agent-cli', '--output=agent.json', '--flag'
+  ]), {
+    cwd: '.', taskId: 'task', prompt: 'prompt', command: 'agent-cli',
+    args: ['--output=agent.json', '--flag'], output: 'nested/task.json', allowedPaths: ['docs']
+  });
+  assert.throws(() => parseRunArguments(['.', 'task', 'prompt', 'agent-cli', '--output=task.json']), /must precede a --/);
+  assert.throws(() => parseRunArguments(['.', 'task', 'prompt', '--unknown', '--', 'agent-cli']), /unknown run option/);
+});
+
+test('generic CLI artifact writing creates parent directories', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'guard-agent-write-'));
+  const destination = path.join(directory, 'nested', 'task.guard.json');
+  await writeArtifact(destination, { schema: 'test', value: 1 });
+  assert.deepEqual(JSON.parse(await fs.readFile(destination, 'utf8')), { schema: 'test', value: 1 });
+});
+
+test('generic artifacts preserve the existing review lifecycle', { concurrency: false }, async () => {
+  const { repository } = await fixture();
+  const artifactPath = path.join(repository, 'generic.guard.json');
+  const artifact = await captureAgentTask({
+    cwd: repository, taskId: 'generic-review', prompt: 'do nothing', agentId: 'generic-agent',
+    artifactPath, test: false, run: async () => ({ code: 0, signal: null, stdout: '', stderr: '' })
+  });
+  await fs.writeFile(artifactPath, JSON.stringify(artifact));
+  const resolved = await require('./core/agent-task').resolveCapturedTask({ artifactPath, decision: 'accepted', reason: 'checked' });
+  assert.deepEqual(resolved.passport.history.map((event) => event.eventType), ['create', 'review', 'resolve']);
+  assert.equal(resolved.review.required, false);
+  assert.equal(resolved.task.status, 'accepted');
+});
+
+test('generic artifacts can continue after a non-final resolution', { concurrency: false }, async () => {
+  const { repository } = await fixture();
+  const artifactPath = path.join(repository, 'generic-cycle.guard.json');
+  const artifact = await captureAgentTask({
+    cwd: repository, taskId: 'generic-cycle', prompt: 'do nothing', agentId: 'generic-agent',
+    artifactPath, test: false, run: async () => ({ code: 0, signal: null, stdout: '', stderr: '' })
+  });
+  await fs.writeFile(artifactPath, JSON.stringify(artifact));
+  const resolveGeneric = require('./core/agent-task').resolveCapturedTask;
+  const first = await resolveGeneric({ artifactPath, decision: 'changes_requested', reason: 'fix one issue' });
+  await fs.writeFile(artifactPath, JSON.stringify(first));
+  const second = await resolveGeneric({ artifactPath, decision: 'accepted', reason: 'issue fixed' });
+  assert.deepEqual(second.passport.history.map((event) => event.eventType), ['create', 'review', 'resolve', 'review', 'resolve']);
+  assert.equal(second.review.required, false);
+});
+
+test('artifact persistence detects tampering and survives round trip', { concurrency: false }, async () => {
+  const { artifact } = await fixture();
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'guard-artifact-'));
+  const artifactPath = path.join(directory, 'artifact.json');
+  await saveArtifact(artifactPath, artifact);
+  assert.deepEqual(await loadArtifact(artifactPath), artifact);
+  const envelope = JSON.parse(await fs.readFile(artifactPath, 'utf8'));
+  envelope.artifact.task.status = 'accepted';
+  await fs.writeFile(artifactPath, JSON.stringify(envelope));
+  await assert.rejects(loadArtifact(artifactPath), /integrity mismatch/);
 });

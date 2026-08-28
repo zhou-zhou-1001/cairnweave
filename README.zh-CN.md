@@ -13,6 +13,7 @@
 - **渐进式三件套：** 按需选择 Relay、`ResultStore` 或 `MemoryPassport`。
 - **显式 provenance：** 未知的 identity、model、URL 和 source 继续保持未知。
 - **防御性历史：** 值会被克隆，记录只追加，复核/争议转换受控。
+- **Agent 中立的任务捕获：** 通用核心与命令 adapter 不依赖 Codex，同时保留原 Codex 入口作为兼容 adapter。
 
 ## 安装
 
@@ -62,6 +63,8 @@ new MemoryPassport().create({ memoryId: 'claim-1', actorAgentId: 'observer', con
 ## Coding Agent 接入
 
 本库既面向 Coding Agent，也可由应用直接使用。Agent 应检查宿主、请求授权、选择最小层、验证接入并提供限定范围的回滚方案。复制使用[唯一接入配方与交接格式](docs/AGENT_INTEGRATION.md)。
+
+通用 API 是 `captureAgentTask({ agentId, run, ... })`；`captureCommandTask({ command, args, ... })` 提供零依赖命令 adapter，对应 CLI 为 `bin/guard-agent-task.js`。既有 `captureCodexTask()` 和 `bin/guard-codex-task.js` 保持兼容。
 
 ## 工具与设计说明
 

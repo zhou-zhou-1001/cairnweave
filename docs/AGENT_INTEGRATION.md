@@ -29,20 +29,23 @@ VERSION AND BOUNDARY: For agent-integrity-guard >=0.1.0 <0.2.0 and Node.js >=18.
 DONE means: the approved minimal integration runs, verification is reproducible, unknown provenance remains unknown, and rollback scope is clear. If a prerequisite or approval is missing, end with a report rather than guessing.
 ```
 
-## Guarded Codex task runner / 受控 Codex 任务运行器
+## Generic guarded Agent task runner / 通用受控 Agent 任务运行器
 
-`bin/guard-codex-task.js` has two separate phases. `run` executes Codex and records runner verification and a review request as distinct runner-authored records. It does **not** create a reviewer-authored passport event. The version 2 artifact captures a SHA-256 revision fingerprint covering `HEAD`, the index, tracked worktree changes, and untracked file paths and contents. A reviewer must then independently run `resolve`; resolution fails if the artifact schema is unsupported or the repository no longer matches the captured revision. The artifact output itself is excluded from the fingerprint when it is inside the reviewed repository.
+The core capture API accepts any injected Agent adapter. Generic artifacts use `agent-integrity-guard/agent-task`, `agent-task-runner`, `agent-task-<taskId>`, and `process.agent`; none of these core fields depends on Codex. `captureCommandTask({ command, args, ... })` is the generic command entry, also exposed by `bin/guard-agent-task.js`. `captureCodexTask()` and `bin/guard-codex-task.js` remain backward-compatible adapters with the legacy Codex artifact shape. Both artifact schemas remain resolvable. The runner does **not** create a reviewer-authored passport event.
 
 `resolve` accepts only `accepted`, `rejected`, `changes_requested`, or `inconclusive`. Its reason is the submitted review evidence; only then are reviewer-authored `review` and `resolve` events appended. `review` and `task` outcomes are recorded separately. Accepted and rejected are final (`review.required: false`); changes requested and inconclusive remain review-required and may be passed to `resolve` again after the next attempt. The compatibility field `reviewRequired` mirrors `review.required`. The artifact also records the pre-run `baseRevision` and post-run reviewed revision. Existing event IDs and timestamps are preserved. Because `MemoryPassport` has no history-import API, resolve validates the captured history and appends schema-compatible events directly instead of replaying and silently rewriting it. The runner rejects the task agent as reviewer, but reviewer identity remains an application-level claim rather than cryptographic authentication. Child processes use `shell: false`.
 
-`bin/guard-codex-task.js` 分为两个独立阶段。`run` 执行 Codex，并将 runner 验证和 review 请求分别记录为 runner 身份的记录；它不会伪造 reviewer 身份的 passport event。版本 2 artifact 使用 SHA-256 指纹覆盖 `HEAD`、index、已跟踪 worktree 变更以及未跟踪文件的路径和内容。reviewer 随后独立执行 `resolve`；若 schema 不受支持或当前仓库与已复核 revision 不一致，resolve 会失败。位于被复核仓库内的 artifact 输出文件自身不计入指纹。
+`captureAgentTask({ agentId, run, ... })` 接受任意注入的 Agent adapter。通用 artifact 使用 `agent-integrity-guard/agent-task`、`agent-task-runner`、`agent-task-<taskId>` 和 `process.agent`，核心字段不依赖 Codex。`captureCommandTask({ command, args, ... })` 与 `bin/guard-agent-task.js` 是通用命令入口。`captureCodexTask()` 和 `bin/guard-codex-task.js` 保留旧 Codex artifact 形状作为兼容 adapter；两种 schema 都可继续 resolve，且 runner 不会伪造 reviewer event。
 
 `resolve` 仅接受 `accepted`、`rejected`、`changes_requested` 或 `inconclusive`。reason 是 reviewer 提交的 review evidence；只有此时才追加 reviewer 身份的 `review` 和 `resolve` event。review 与 task outcome 分开记录。accepted/rejected 是最终结果（`review.required: false`）；changes_requested/inconclusive 仍需 review，下一轮修改后可再次调用 `resolve`。artifact 同时记录执行前 `baseRevision` 和执行后待审查 revision。兼容字段 `reviewRequired` 与 `review.required` 保持一致。原有 event ID 和 timestamp 会被保留。由于 `MemoryPassport` 没有 history-import API，resolve 会验证已有 history 并直接追加 schema-compatible event，而不会通过 replay 静默重写历史。runner 会拒绝把任务 agent 自己当 reviewer，但 reviewer 身份仍只是应用层声明，不是密码学认证。子进程使用 `shell: false`。
 
 ```sh
-node bin/guard-codex-task.js run . task-1 "Update the docs" task-1.guard.json
+node bin/guard-agent-task.js run . task-1 "Update the docs" --output=task-1.guard.json --allow=README.md --allow=docs -- my-agent --json
+node bin/guard-codex-task.js run . task-1 "Update the docs" task-1.guard.json --allow=README.md --allow=docs
 node bin/guard-codex-task.js resolve task-1.guard.json accepted "Reviewed the diff and tests"
 ```
+
+`--allow` accepts repository-relative files or directory prefixes. The `--` separator ends runner option parsing, so all following values are passed unchanged to the command. The runner records `changedBefore`, `changedAfter`, and `violations` in the artifact. A scope violation, agent execution failure, diff-check failure, or test failure is blocked from review rather than presented as an ordinary review request. The artifact output itself is excluded from scope detection. Scope enforcement reports and blocks; it does not automatically revert files.
 
 ## Canonical Agent Recipe（唯一接入配方）
 
