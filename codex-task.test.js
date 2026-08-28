@@ -237,3 +237,91 @@ test('artifact persistence detects tampering and survives round trip', { concurr
   await fs.writeFile(artifactPath, JSON.stringify(envelope));
   await assert.rejects(loadArtifact(artifactPath), /integrity mismatch/);
 });
+
+async function tamperedResolve(artifactPath, artifact, mutate) {
+  const clone = structuredClone(artifact);
+  mutate(clone);
+  await fs.writeFile(artifactPath, JSON.stringify(clone));
+  return resolveCapturedTask({ artifactPath, decision: 'accepted', reason: 'checked' });
+}
+
+test('resolve rejects tampered resultStore chains', { concurrency: false }, async () => {
+  const { artifactPath, artifact } = await fixture();
+  await assert.rejects(tamperedResolve(artifactPath, artifact, (a) => { a.resultStore[0].agentId = 'forged-agent'; }), /resultStore handoff is inconsistent/);
+  await assert.rejects(tamperedResolve(artifactPath, artifact, (a) => { a.resultStore[0].event.result.result.taskId = 'forged'; }), /resultStore handoff is inconsistent/);
+  await assert.rejects(tamperedResolve(artifactPath, artifact, (a) => { a.resultStore[1].event.kind = 'runner_verification_forged'; }), /resultStore runner verification is inconsistent/);
+  await assert.rejects(tamperedResolve(artifactPath, artifact, (a) => { a.resultStore[2].event.requestedReviewerAgentId = 'attacker'; }), /resultStore review request is inconsistent/);
+  await assert.rejects(tamperedResolve(artifactPath, artifact, (a) => { a.resultStore[2].event.reviewedRevision = 'f'.repeat(64); }), /resultStore review request is inconsistent/);
+  await assert.rejects(tamperedResolve(artifactPath, artifact, (a) => { a.resultStore[2].sequence = 4; }), /resultStore review request is inconsistent/);
+  await assert.rejects(tamperedResolve(artifactPath, artifact, (a) => { a.resultStore.pop(); }), /resultStore is invalid/);
+});
+
+test('resolve rejects tampered passport current state', { concurrency: false }, async () => {
+  const { artifactPath, artifact } = await fixture();
+  await assert.rejects(tamperedResolve(artifactPath, artifact, (a) => { a.passport.current.content.taskId = 'forged'; }), /passport current\/timeline do not match history/);
+  await assert.rejects(tamperedResolve(artifactPath, artifact, (a) => { a.passport.current.lastEventId = 'forged'; }), /passport current\/timeline do not match history/);
+  await assert.rejects(tamperedResolve(artifactPath, artifact, (a) => { a.passport.current.status = 'resolved'; }), /passport current\/timeline do not match history/);
+  await assert.rejects(tamperedResolve(artifactPath, artifact, (a) => { delete a.passport.current.source; }), /passport current\/timeline do not match history/);
+});
+
+test('resolve rejects tampered passport timeline', { concurrency: false }, async () => {
+  const { artifactPath, artifact } = await fixture();
+  await assert.rejects(tamperedResolve(artifactPath, artifact, (a) => { a.passport.timeline[0].summary = 'Forged summary'; }), /passport current\/timeline do not match history/);
+  await assert.rejects(tamperedResolve(artifactPath, artifact, (a) => { a.passport.timeline[0].statusAfter = 'resolved'; }), /passport current\/timeline do not match history/);
+  await assert.rejects(tamperedResolve(artifactPath, artifact, (a) => { a.passport.timeline.pop(); }), /passport current\/timeline do not match history/);
+});
+
+test('resolve rejects a forged taskId and non-normalized cwd', { concurrency: false }, async () => {
+  const { artifactPath, artifact } = await fixture();
+  await assert.rejects(tamperedResolve(artifactPath, artifact, (a) => { a.taskId = 'forged-task'; }), /passport create event is invalid/);
+  await assert.rejects(tamperedResolve(artifactPath, artifact, (a) => { a.cwd = `${a.cwd}/sub`; }), /cwd must be an existing directory/);
+  await assert.rejects(tamperedResolve(artifactPath, artifact, (a) => { a.cwd = a.cwd.replace(/^\//, ''); }), /cwd must be absolute and normalized/);
+});
+
+test('resolve rejects a forged runnerVerificationSequence', { concurrency: false }, async () => {
+  const { artifactPath, artifact } = await fixture();
+  await assert.rejects(tamperedResolve(artifactPath, artifact, (a) => { a.review.runnerVerificationSequence = 99; }), /runnerVerificationSequence is inconsistent/);
+  await assert.rejects(tamperedResolve(artifactPath, artifact, (a) => { delete a.review.runnerVerificationSequence; }), /runnerVerificationSequence is inconsistent/);
+});
+
+test('resolve rejects duplicate passport event ids', { concurrency: false }, async () => {
+  const { artifactPath, artifact } = await fixture();
+  const first = await resolveCapturedTask({ artifactPath, decision: 'changes_requested', reason: 'one issue remains' });
+  await fs.writeFile(artifactPath, JSON.stringify(first));
+  const tampered = structuredClone(first);
+  tampered.passport.history[1].eventId = tampered.passport.history[0].eventId;
+  await fs.writeFile(artifactPath, JSON.stringify(tampered));
+  await assert.rejects(resolveCapturedTask({ artifactPath, decision: 'accepted', reason: 'issue fixed' }), /passport history sequence is invalid/);
+});
+
+test('resolve rejects tampered revision components', { concurrency: false }, async () => {
+  const { artifactPath, artifact } = await fixture();
+  await assert.rejects(tamperedResolve(artifactPath, artifact, (a) => { a.revision.components.worktree = 'a'.repeat(64); }), /revision components do not match value/i);
+  await assert.rejects(tamperedResolve(artifactPath, artifact, (a) => { a.baseRevision.components.index = 'b'.repeat(40); }), /revision components do not match value/i);
+  await assert.rejects(tamperedResolve(artifactPath, artifact, (a) => { a.revision.value = 'c'.repeat(64); }), /revision components do not match value/i);
+});
+
+test('resolve rejects review state inconsistent with task status', { concurrency: false }, async () => {
+  const { artifactPath, artifact } = await fixture();
+  await assert.rejects(tamperedResolve(artifactPath, artifact, (a) => { a.task.status = 'accepted'; }), /artifact.review is inconsistent with task status/);
+  await assert.rejects(tamperedResolve(artifactPath, artifact, (a) => { a.reviewRequired = false; }), /reviewRequired is inconsistent/);
+  await assert.rejects(tamperedResolve(artifactPath, artifact, (a) => { a.review.decision = 'accepted'; }), /artifact.review is inconsistent with task status/);
+  await assert.rejects(tamperedResolve(artifactPath, artifact, (a) => { a.review.status = 'completed'; }), /artifact.review is inconsistent with task status/);
+  await assert.rejects(tamperedResolve(artifactPath, artifact, (a) => { a.review.requestedReviewerAgentId = 'attacker'; }), /resultStore review request is inconsistent/);
+});
+
+test('resolve rejects missing or forged passport payload fields', { concurrency: false }, async () => {
+  const { artifactPath, artifact } = await fixture();
+  await assert.rejects(tamperedResolve(artifactPath, artifact, (a) => { delete a.passport.history[0].payload.source; }), /passport create event is invalid/);
+  await assert.rejects(tamperedResolve(artifactPath, artifact, (a) => { a.passport.history[0].eventType = 'update'; }), /passport create event is invalid/);
+});
+
+test('resolve rejects an accepted artifact whose history ends before a resolution', { concurrency: false }, async () => {
+  const { artifactPath, artifact } = await fixture();
+  const resolved = await resolveCapturedTask({ artifactPath, decision: 'changes_requested', reason: 'one issue remains' });
+  await fs.writeFile(artifactPath, JSON.stringify(resolved));
+  const tampered = structuredClone(resolved);
+  tampered.passport.history.pop();
+  await fs.writeFile(artifactPath, JSON.stringify(tampered));
+  await assert.rejects(resolveCapturedTask({ artifactPath, decision: 'accepted', reason: 'issue fixed' }), /passport history must end at a resolution/);
+});

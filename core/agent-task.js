@@ -1,8 +1,10 @@
 'use strict';
 
 const fsp = require('node:fs/promises');
+const fs = require('node:fs');
 const path = require('node:path');
 const { createHash, randomUUID } = require('node:crypto');
+const { isDeepStrictEqual } = require('node:util');
 const { spawn } = require('node:child_process');
 const { MemoryPassport } = require('../memory-passport');
 const { relayExternalResult } = require('../relay');
@@ -106,44 +108,106 @@ function pathAllowed(changed, allowed) {
   return allowed.some((prefix) => changed === prefix || changed.startsWith(`${prefix}/`));
 }
 
+function validateRevision(revision, name) {
+  if (!revision || revision.algorithm !== 'sha256' || typeof revision.value !== 'string' || !/^[a-f0-9]{64}$/.test(revision.value)) throw new TypeError(`${name} is invalid`);
+  const components = revision.components;
+  if (!components || (components.head !== null && typeof components.head !== 'string') || typeof components.index !== 'string' || typeof components.worktree !== 'string' || typeof components.untracked !== 'string' || !/^[a-f0-9]{40}$/.test(components.index) || !/^[a-f0-9]{64}$/.test(components.worktree) || !/^[a-f0-9]{64}$/.test(components.untracked)) throw new TypeError(`${name}.components is invalid`);
+  if (hashParts([components.head || 'unborn', components.index, components.worktree, components.untracked]) !== revision.value) throw new Error(`${name} components do not match value`);
+}
+
+function validateResultStore(artifact) {
+  const records = artifact.resultStore;
+  if (!Array.isArray(records) || records.length < 3) throw new TypeError('artifact.resultStore is invalid');
+  const first = records[0];
+  const runnerId = artifact.schema === 'agent-integrity-guard/codex-task' ? 'codex-task-runner' : 'agent-task-runner';
+  if (!first || first.sequence !== 1 || first.agentId !== artifact.passport.history[0].actorAgentId || !first.event || first.event.kind !== (artifact.schema === 'agent-integrity-guard/codex-task' ? 'codex_handoff' : 'agent_handoff') || !first.event.result || !first.event.result.result || first.event.result.result.taskId !== artifact.taskId) throw new TypeError('resultStore handoff is inconsistent');
+  const verification = records[1];
+  if (!verification || verification.sequence !== 2 || verification.agentId !== runnerId || !verification.event || verification.event.kind !== 'runner_verification' || !verification.event.checks || typeof verification.event.checks !== 'object') throw new TypeError('resultStore runner verification is inconsistent');
+  const request = records[2];
+  if (!request || request.sequence !== 3 || request.agentId !== runnerId || !request.event || request.event.kind !== 'review_request' || request.event.requestedReviewerAgentId !== artifact.review.requestedReviewerAgentId || request.event.reviewedRevision !== artifact.revision.value) throw new TypeError('resultStore review request is inconsistent');
+  if (artifact.review.runnerVerificationSequence !== verification.sequence) throw new TypeError('runnerVerificationSequence is inconsistent');
+  for (let i = 0; i < records.length; i += 1) if (!records[i] || records[i].sequence !== i + 1 || typeof records[i].agentId !== 'string') throw new TypeError('resultStore sequence is invalid');
+}
+
 function validateArtifact(artifact, schemas) {
   if (!artifact || typeof artifact !== 'object' || artifact.version !== VERSION || !schemas.includes(artifact.schema)) throw new Error(`unsupported artifact version or schema (expected version ${VERSION})`);
   nonEmpty(artifact.taskId, 'artifact.taskId'); nonEmpty(artifact.cwd, 'artifact.cwd');
-  if (!artifact.revision || artifact.revision.algorithm !== 'sha256' || typeof artifact.revision.value !== 'string') throw new TypeError('artifact.revision is invalid');
-  const reviewOpen = artifact.review && artifact.review.required === true && (
-    artifact.review.status === 'pending' && artifact.review.decision === null
-    || artifact.review.status === 'completed' && ['changes_requested', 'inconclusive'].includes(artifact.review.decision)
-  );
-  if (!reviewOpen) throw new TypeError('artifact.review is not open for another review');
+  if (path.resolve(artifact.cwd) !== artifact.cwd) throw new TypeError('artifact.cwd must be absolute and normalized');
+  let cwdStat;
+  try { cwdStat = fs.statSync(artifact.cwd); } catch { throw new TypeError('artifact.cwd must be an existing directory'); }
+  if (!cwdStat.isDirectory()) throw new TypeError('artifact.cwd must be an existing directory');
+  validateRevision(artifact.baseRevision, 'artifact.baseRevision');
+  validateRevision(artifact.revision, 'artifact.revision');
+  if (!artifact.review || typeof artifact.review !== 'object' || !nonEmpty(artifact.review.requestedReviewerAgentId, 'review.requestedReviewerAgentId')) throw new TypeError('artifact.review is invalid');
   if (!artifact.task || typeof artifact.task.status !== 'string') throw new TypeError('artifact.task is invalid');
+  if (typeof artifact.reviewRequired !== 'boolean' || artifact.reviewRequired !== artifact.review.required) throw new TypeError('reviewRequired is inconsistent');
+  const expectedOpen = artifact.task.status === 'awaiting_review' || artifact.task.status === 'changes_requested' || artifact.task.status === 'inconclusive';
+  const reviewOpen = artifact.review.required === true && ((artifact.review.status === 'pending' && artifact.review.decision === null) || (artifact.review.status === 'completed' && ['changes_requested', 'inconclusive'].includes(artifact.review.decision)));
+  if (expectedOpen !== reviewOpen) throw new TypeError('artifact.review is inconsistent with task status');
   if (!artifact.passport || typeof artifact.passport !== 'object') throw new TypeError('artifact.passport is invalid');
   const memoryId = nonEmpty(artifact.passport.memoryId, 'artifact.passport.memoryId');
   const history = artifact.passport.history;
   if (!Array.isArray(history) || history.length < 1) throw new TypeError('artifact passport history is invalid');
-  const event = history[0];
-  if (!event || event.memoryId !== memoryId || event.seq !== 1 || event.eventType !== 'create' || !event.payload || typeof event.payload !== 'object') throw new TypeError('artifact passport create event is invalid');
-  nonEmpty(event.eventId, 'passport.history[0].eventId'); nonEmpty(event.timestamp, 'passport.history[0].timestamp'); nonEmpty(event.actorAgentId, 'passport.history[0].actorAgentId');
+  const ids = new Set();
   for (let index = 0; index < history.length; index += 1) {
     const current = history[index];
-    if (!current || current.memoryId !== memoryId || current.seq !== index + 1 || !nonEmpty(current.eventId, `passport.history[${index}].eventId`) || !nonEmpty(current.timestamp, `passport.history[${index}].timestamp`) || !nonEmpty(current.actorAgentId, `passport.history[${index}].actorAgentId`)) throw new TypeError('artifact passport history sequence is invalid');
+    if (!current || current.memoryId !== memoryId || current.seq !== index + 1 || !nonEmpty(current.eventId, `passport.history[${index}].eventId`) || ids.has(current.eventId) || !nonEmpty(current.timestamp, `passport.history[${index}].timestamp`) || !nonEmpty(current.actorAgentId, `passport.history[${index}].actorAgentId`) || !current.payload || typeof current.payload !== 'object') throw new TypeError('artifact passport history sequence is invalid');
+    ids.add(current.eventId);
   }
+  const create = history[0];
+  if (create.eventType !== 'create' || !isDeepStrictEqual(create.payload.content && create.payload.content.taskId, artifact.taskId) || !create.payload.source || create.payload.source.resultSequence !== 1) throw new TypeError('artifact passport create event is invalid');
   if (history.length > 1 && history[history.length - 1].eventType !== 'resolve') throw new TypeError('artifact passport history must end at a resolution');
   for (let index = 1; index < history.length; index += 1) {
     const current = history[index];
     const expected = index % 2 === 1 ? 'review' : 'resolve';
-    if (current.eventType !== expected || !current.payload || typeof current.payload !== 'object') throw new TypeError('artifact passport history lifecycle is invalid');
-    if (current.eventType === 'resolve' && !DECISIONS.has(current.payload.decision)) throw new TypeError('artifact passport history contains an invalid decision');
+    if (current.eventType !== expected) throw new TypeError('artifact passport history lifecycle is invalid');
+    if (current.eventType === 'review' && (!nonEmpty(current.payload.reason, 'review reason') || !current.payload.source || current.payload.source.kind !== 'review_evidence' || current.payload.source.revision !== artifact.revision.value)) throw new TypeError('artifact passport review event is invalid');
+    if (current.eventType === 'resolve' && (!DECISIONS.has(current.payload.decision) || !nonEmpty(current.payload.reason, 'resolve reason') || !current.payload.source || current.payload.source.reviewEventId !== history[index - 1].eventId || current.payload.source.revision !== artifact.revision.value)) throw new TypeError('artifact passport resolve event is invalid');
   }
+  const final = history[history.length - 1];
+  if (final.eventType === 'resolve') {
+    if (artifact.task.status !== final.payload.decision || artifact.review.decision !== final.payload.decision || artifact.review.status !== 'completed' || artifact.review.reviewerAgentId !== final.actorAgentId) throw new TypeError('review state is inconsistent with passport resolution');
+  } else if (artifact.task.status !== 'awaiting_review' || artifact.review.status !== 'pending' || artifact.review.decision !== null) throw new TypeError('pending review state is inconsistent');
+  validateResultStore(artifact);
+  if (!artifact.passport.current || !Array.isArray(artifact.passport.timeline) || !isDeepStrictEqual(artifact.passport.current, rebuildCurrent(history)) || !isDeepStrictEqual(artifact.passport.timeline, makeTimeline(history))) throw new TypeError('passport current/timeline do not match history');
+}
+
+function rebuildCurrent(history) {
+  const created = history[0];
+  const state = { memoryId: created.memoryId, status: 'active', content: structuredClone(created.payload.content), createdByAgentId: created.actorAgentId, lastEventId: created.eventId, seq: created.seq };
+  if (Object.hasOwn(created.payload, 'source')) state.source = structuredClone(created.payload.source);
+  for (const event of history.slice(1)) {
+    if (event.eventType === 'review') { state.status = 'disputed'; state.reviewReason = event.payload.reason; delete state.disputeReason; delete state.resolution; }
+    else if (event.eventType === 'resolve') { state.status = 'resolved'; state.resolution = { adjudicatorAgentId: event.actorAgentId, reason: event.payload.reason, decision: event.payload.decision }; delete state.disputeReason; delete state.reviewReason; if (Object.hasOwn(event.payload, 'content')) { state.content = structuredClone(event.payload.content); if (!Object.hasOwn(event.payload, 'source')) delete state.source; } if (Object.hasOwn(event.payload, 'source')) state.source = structuredClone(event.payload.source); }
+    state.lastEventId = event.eventId; state.seq = event.seq;
+  }
+  return state;
 }
 
 function makeTimeline(history) {
-  return history.map((event) => ({
-    seq: event.seq, eventId: event.eventId, timestamp: event.timestamp, actorAgentId: event.actorAgentId, eventType: event.eventType,
-    summary: event.eventType === 'create' ? 'Created memory' : event.eventType === 'review' ? 'Requested review' : `Resolved dispute: ${event.payload.decision}`,
-    ...(event.payload.reason ? { reason: event.payload.reason } : {}),
-    ...(event.eventType === 'resolve' ? { decision: event.payload.decision } : {}),
-    sourceProvided: Object.hasOwn(event.payload, 'source'), statusAfter: event.eventType === 'create' ? 'active' : event.eventType === 'review' ? 'disputed' : 'resolved'
-  }));
+  let status = 'active';
+  return history.map((event) => {
+    const entry = {
+      seq: event.seq, eventId: event.eventId, timestamp: event.timestamp, actorAgentId: event.actorAgentId, eventType: event.eventType
+    };
+    if (event.eventType === 'create') {
+      entry.summary = 'Created memory';
+      entry.contentChanged = true;
+    } else if (event.eventType === 'review') {
+      entry.summary = status === 'resolved' ? 'Requested review again' : 'Requested review';
+      entry.reason = event.payload.reason;
+      status = 'disputed';
+    } else if (event.eventType === 'resolve') {
+      entry.summary = `Resolved dispute: ${event.payload.decision}`;
+      entry.reason = event.payload.reason;
+      entry.decision = event.payload.decision;
+      entry.contentChanged = Object.hasOwn(event.payload, 'content');
+      status = 'resolved';
+    }
+    entry.sourceProvided = Object.hasOwn(event.payload, 'source');
+    entry.statusAfter = status;
+    return entry;
+  });
 }
 
 async function captureAgentTask({ cwd, taskId, prompt, agentId = 'agent', run, handoffKind = 'agent_handoff', reviewAgentId = 'reviewer', test = true, artifactPath, allowedPaths } = {}) {
