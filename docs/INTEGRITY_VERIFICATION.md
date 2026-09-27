@@ -2,7 +2,7 @@
 
 ## 结论
 
-Agent Integrity Guard 当前提供的是三层中的前两层：
+CairnWeave 当前提供的是三层中的前两层：
 
 1. **逻辑完整性（当前主要能力）**：验证任务、执行结果、Git revision、scope、review 状态、passport history、current state 和 timeline 之间的结构与引用关系是否自洽。
 2. **篡改可见性（有限能力）**：artifact envelope 可用 SHA-256 检查保存后的 payload 是否被改写；这不是认证，也不是签名。
@@ -12,7 +12,7 @@ Agent Integrity Guard 当前提供的是三层中的前两层：
 
 ## 已验证的逻辑完整性
 
-`npm test` 当前包含 62 个测试，覆盖以下攻击面：
+`npm test` 当前包含 129 个测试，覆盖以下攻击面：
 
 - 状态机：`awaiting_review`、`changes_requested`、`inconclusive`、`accepted`、`rejected` 的 review 生命周期；
 - resultStore 三事件链：handoff → runner verification → review request；
@@ -23,12 +23,17 @@ Agent Integrity Guard 当前提供的是三层中的前两层：
 - 从 history 重建 `passport.current` 和 `passport.timeline`，拒绝派生视图被单独篡改；
 - task ID、cwd、schema、runner identity、handoff kind 等跨字段关系；
 - revision 的 SHA-256 value、components 格式以及 components → value 的重算关系；
+- 事件日志 canonicalization：版本化 envelope、确定性 key 排序、稳定 digest vector、项目绑定、digest mismatch 与非法 digest 输入；这里是项目自定义 canonicalization，不声称符合 RFC 8785/JCS；
+- 事件日志范围 digest（`computeEventLogRangeDigest`）：闭合区间摘要与全日志 digest 字节一致、跨运行时固定测试向量、反向/越界区间拒绝；
+- authority 快照与事件日志的一致性校验（`verifyAuthorityContextEventLog`）：范围覆盖存在性、digest 元数据与精确闭区间重算比对、缺失 digest 时的纯范围校验、不要求 `toSeq === eventCount`（不发明 winner/激活/latest 语义）；
+- 事件日志结构校验：必填字段必须是自有且可枚举的数据属性，拒绝原型链继承、不可枚举属性和 accessor 伪造的必填字段；
+- `diagnoseEvents` 结构化诊断：与 `validateEvents` 边界一致的非抛错伴生检查，输出稳定 code/path/index/seq，收集多重独立缺陷，抵御 Proxy/accessor/稀疏数组/循环/非数组等恶意输入，且绝不回显 claim 标识或 claim 内容；
 - 当前 revision 与 resolve 时工作区 fingerprint 的比对；
 - artifact 本身排除在工作区 scope 检测之外，但其他越界路径仍阻止 review；
 - 旧 Codex schema、事件类型、runner identity、memory ID 和多轮 review 生命周期兼容性；
 - 命令 adapter 的 `shell: false`、stdin prompt 和参数边界。
 
-这些检查保证的是：**如果输入 artifact 被提交给 Guard，Guard 能发现大量内部矛盾、断链和不匹配。**
+这些检查保证的是：**如果输入 artifact 被提交给 CairnWeave，CairnWeave 能发现大量内部矛盾、断链和不匹配。**
 
 ## Artifact envelope 的实际语义
 
@@ -64,11 +69,11 @@ npm test
 git diff --check
 ```
 
-预期：62 个测试全部通过，且 diff 检查无输出。
+预期：129 个测试全部通过，且 diff 检查无输出。
 
 ## 后续安全化路线（不属于当前版本）
 
-如果未来要把 Guard 提升为安全边界，需要单独设计协议，而不是继续增加字符串字段：
+如果未来要把 CairnWeave 提升为安全边界，需要单独设计协议，而不是继续增加字符串字段：
 
 1. 用受保护私钥对 execution receipt、revision、scope、输出摘要和事件链签名；
 2. 为 agent、reviewer、runner 建立可验证的身份与密钥绑定；
