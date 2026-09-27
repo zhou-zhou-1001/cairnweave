@@ -1,7 +1,7 @@
 {
-  "name": "agent-integrity-guard",
+  "name": "cairnweave",
   "version": "0.1.0",
-  "description": "Small dependency-free primitives for trustworthy multi-agent coordination.",
+  "description": "The provenance fabric for multi-agent systems.",
   "main": "index.js",
   "type": "commonjs",
   "exports": "./index.js",
@@ -12,11 +12,14 @@
     "relay.js",
     "result-store.js",
     "artifact-store.js",
+    "project-memory.js",
     "core/",
     "bin/",
     "docs/",
     "examples/",
     "README.md",
+    "README.zh-CN.md",
+    "COMPATIBILITY.md",
     "LICENSE"
   ],
   "scripts": {

@@ -6,6 +6,13 @@ const { BASE_CONTEXT_FILES, loadBaseContext } = require('./context-loader');
 const { relayExternalResult } = require('./relay');
 const { ResultStore } = require('./result-store');
 
+test('package metadata and self-reference expose the CairnWeave identity', () => {
+  const metadata = require('./package.json');
+  assert.equal(metadata.name, 'cairnweave');
+  assert.equal(metadata.description, 'The provenance fabric for multi-agent systems.');
+  assert.strictEqual(require('cairnweave'), require('.'));
+});
+
 test('package entry point exposes the complete public API', () => {
   const api = require('.');
   assert.deepEqual(Object.keys(api).sort(), [

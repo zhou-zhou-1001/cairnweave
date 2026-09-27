@@ -5,9 +5,9 @@
 Copy this recipe to a Coding Agent. It is the one canonical integration recipe; the examples later are API documentation, not a second recipe.
 
 ```text
-AGENT TASK / INTEGRATION RECIPE — Agent Integrity Guard
+AGENT TASK / INTEGRATION RECIPE — CairnWeave
 
-VERSION AND BOUNDARY: For agent-integrity-guard >=0.1.0 <0.2.0 and Node.js >=18. Before installation, read the package.json, README, root exports, and actual API signatures for the version that will really be used. A version range never replaces API inspection. This is a dependency-free, in-process CommonJS library actively called by the host; it is not a daemon and provides no persistence, network transport, authentication, authorization, signatures, or security boundary.
+VERSION AND BOUNDARY: For cairnweave >=0.1.0 <0.2.0 and Node.js >=18. Before installation, read the package.json, README, root exports, and actual API signatures for the version that will really be used. A version range never replaces API inspection. This is a dependency-free, in-process CommonJS library actively called by the host; it is not a daemon and provides no persistence, network transport, authentication, authorization, signatures, or security boundary.
 
 1. DISCOVERY (read-only first): Find the project root and package.json. Identify the package manager and lockfile, CJS/ESM mode, actual Node version, existing test/lint/typecheck/build commands, and the host's canonical agent-identity schema. Inspect uncommitted work and confirm that the dependency is compatible with existing constraints. If Node is below 18, the package manager is unclear, the dependency is unavailable, or the project state cannot be determined: stop and report; do not guess, install, or edit.
 2. AUTHORIZATION GATE: Before editing, tell the user the proposed layer, files, and commands, then wait for explicit approval. Installing a dependency, changing package.json/lockfiles, changing production paths, and adding an identity mapping each require approval within scope. Preserve existing uncommitted work and edit only what is necessary.
@@ -18,8 +18,8 @@ VERSION AND BOUNDARY: For agent-integrity-guard >=0.1.0 <0.2.0 and Node.js >=18.
    C. MEMORYPASSPORT: add MemoryPassport only when claim history and dispute/resolve workflow are needed. Use a stable memoryId. source.resultSequence is an explicit caller provenance declaration; this library does not verify that the referenced result exists.
    loadBaseContext is independent and optional; use it only when the host needs one base-context loader, never automatically because A/B/C was selected.
 5. IMPORT (use the host's real module system; do not guess):
-   CommonJS: const { relayExternalResult } = require('agent-integrity-guard');
-   ESM: import { createRequire } from 'node:module'; const require = createRequire(import.meta.url); const { relayExternalResult } = require('agent-integrity-guard');
+   CommonJS: const { relayExternalResult } = require('cairnweave');
+   ESM: import { createRequire } from 'node:module'; const require = createRequire(import.meta.url); const { relayExternalResult } = require('cairnweave');
    Example: relayExternalResult({ agentId, result, ...(url !== undefined ? { url } : {}), ...(model !== undefined ? { model } : {}) }); Never invent identity, model, URL, or source.
 6. CHANGE: Make the smallest edit in the host's existing entry/adapter layer. Preserve its module system, errors, and business semantics. Record the baseline (for example, a scoped git diff or copies of target files) and track every file changed by this integration.
 7. VERIFICATION / STOP: Run the host's existing test, lint, typecheck, and build commands when present, then a smallest smoke test for the selected layer. Verify relay fields; for ResultStore verify instance-local sequence/read; for MemoryPassport verify history/status. On any failure, record command, output, and impact, stop, and report. Do not widen dependencies, production design, or file scope.
@@ -52,9 +52,9 @@ node bin/guard-codex-task.js resolve task-1.guard.json accepted "Reviewed the di
 把下面的配方复制给 Coding Agent。后文示例只是 API 文档，不是第二份相互独立的 Recipe。
 
 ```text
-AGENT TASK / INTEGRATION RECIPE — Agent Integrity Guard
+AGENT TASK / INTEGRATION RECIPE — CairnWeave
 
-版本与边界：适用于 agent-integrity-guard >=0.1.0 <0.2.0 与 Node.js >=18。安装前必须读取实际将使用版本的 package.json、README、根导出和 API 签名；版本范围不能替代 API 检查。本库是零依赖、进程内、由宿主主动调用的 CommonJS 库，不是 daemon；不提供持久化、网络传输、认证、授权、签名或安全边界。
+版本与边界：适用于 cairnweave >=0.1.0 <0.2.0 与 Node.js >=18。安装前必须读取实际将使用版本的 package.json、README、根导出和 API 签名；版本范围不能替代 API 检查。本库是零依赖、进程内、由宿主主动调用的 CommonJS 库，不是 daemon；不提供持久化、网络传输、认证、授权、签名或安全边界。
 
 1. DISCOVERY（先只读）：定位项目根目录和 package.json；识别包管理器与锁文件、CJS/ESM、实际 Node 版本、已有 test/lint/typecheck/build 命令，以及宿主已有的 canonical agent identity schema。检查未提交改动并确认依赖符合现有约束。若 Node <18、包管理器不明确、依赖不可用或项目状态无法判断：停止并报告，不猜测、不安装、不修改。
 2. AUTHORIZATION（确认门）：修改前向用户列出拟用层级、文件和命令，等待明确授权。安装依赖、修改 package.json/锁文件、修改生产路径、增加 identity 映射，都必须在授权范围内。保留用户已有未提交改动，只改必要文件。
@@ -65,8 +65,8 @@ AGENT TASK / INTEGRATION RECIPE — Agent Integrity Guard
    C. MEMORYPASSPORT：只有需要 claim 历史和 dispute/resolve 流程时才使用稳定 memoryId。source.resultSequence 是调用方显式声明的 provenance；本库不验证被引用结果是否存在。
    loadBaseContext 是独立可选能力，只有宿主需要统一基础上下文加载时才接入，不能因选了 A/B/C 就默认接入。
 5. IMPORT（按实际模块系统采用准确形式，不猜）：
-   CommonJS：const { relayExternalResult } = require('agent-integrity-guard');
-   ESM：import { createRequire } from 'node:module'; const require = createRequire(import.meta.url); const { relayExternalResult } = require('agent-integrity-guard');
+   CommonJS：const { relayExternalResult } = require('cairnweave');
+   ESM：import { createRequire } from 'node:module'; const require = createRequire(import.meta.url); const { relayExternalResult } = require('cairnweave');
    示例：relayExternalResult({ agentId, result, ...(url !== undefined ? { url } : {}), ...(model !== undefined ? { model } : {}) }); 不得编造 identity、model、URL 或 source。
 6. CHANGE：在宿主现有入口/适配层做最小改动，保留其模块系统、错误处理和业务语义。开始前记录基线（例如限定范围 git diff 或目标文件副本），并记录本次实际修改的每个文件。
 7. VERIFICATION / STOP：运行宿主已有的 test、lint、typecheck、build（存在才运行），再运行与所选层匹配的最小 smoke test。验证 relay 字段；选 store 则验证实例内 sequence/read；选 passport 则验证 history/status。任一步失败，记录命令、输出和影响，停止并报告；不要擅自扩大依赖、生产设计或文件范围。
