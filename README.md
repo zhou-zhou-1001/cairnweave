@@ -1,85 +1,142 @@
-# Agent Integrity Guard
+# CairnWeave
 
-> **Coding Agent entry:** Integrate the smallest suitable layer from this repository. Ask before changing dependencies or production paths, then test and report changes, verification, rollback, and limitations. See the [complete integration recipe](docs/AGENT_INTEGRATION.md).
->
-> 中文版：[README.zh-CN.md](README.zh-CN.md)
+> **The provenance fabric for multi-agent systems.**
 
-A zero-dependency, in-process CommonJS toolkit that adds explicit producer labels, ordering, claim history, and adjudication status to agent result handoffs.
+中文：[README.zh-CN.md](README.zh-CN.md)
 
-## Features
+CairnWeave is a zero-dependency, in-process CommonJS toolkit for making agent handoffs explicit: who produced a result, what was handed off, in what order, and what review state it is in.
 
-- **Zero dependencies:** Node.js 18+ with no runtime packages.
-- **In-process and side-effect free:** no daemon, network, persistence, authentication, or hidden I/O.
-- **Progressive primitives:** adopt Relay, `ResultStore`, or `MemoryPassport` only as needed.
-- **Explicit provenance:** unknown identity, model, URL, and source remain unknown.
-- **Defensive history:** cloned values, append-only records, and controlled review/dispute transitions.
-- **Agent-neutral task capture:** a generic core and command adapter, with the existing Codex entry retained as a compatibility adapter.
+It runs on Node.js >=18 and has no daemon, network calls, persistence layer, authentication system, or hidden I/O. You choose only the primitive your application or coding-agent workflow needs.
 
-## Installation
+Previously published as **Agent Integrity Guard** / `agent-integrity-guard`. Existing APIs, CLI filenames, and serialized schema identifiers remain supported; see [Compatibility and Migration](#compatibility-and-migration).
+
+## Quick Start
+
+Install:
 
 ```sh
-npm install agent-integrity-guard
+npm install cairnweave
 ```
 
-## 30-second start
+Forward an external agent result without inventing missing provenance:
 
 ```js
-const { relayExternalResult } = require('agent-integrity-guard');
-const relayed = relayExternalResult({
-  agentId: response.agentId, result: response.output, url: response.url
+const { relayExternalResult } = require('cairnweave');
+
+const handoff = relayExternalResult({
+  agentId: response.agentId,
+  result: response.output,
+  url: response.url
 });
 ```
 
-Only explicitly supplied fields are forwarded; the library never invents identity or provenance.
+Only caller-supplied fields are preserved. Unknown identity, model, URL, or source remains unknown.
 
-## Choose the smallest layer
-
-### Relay
-
-Faithfully forwards `agentId`, `result`, and optional `url`/`model` when a handoff only needs honest field preservation.
+For ordered handoffs:
 
 ```js
-relayExternalResult({ agentId: 'planner', result: { ok: true } });
+const { ResultStore } = require('cairnweave');
+
+const store = new ResultStore();
+store.append('planner', { kind: 'plan' });
+store.append('builder', { kind: 'patch' });
 ```
 
-### ResultStore
-
-Adds append/read ordering within one store instance. Sequence numbers do not span instances or processes.
+For claim history:
 
 ```js
-new ResultStore().append('planner', { kind: 'plan' });
+const { MemoryPassport } = require('cairnweave');
+
+const passport = new MemoryPassport();
+passport.create({
+  memoryId: 'claim-1',
+  actorAgentId: 'observer',
+  content: { status: 'checked' }
+});
 ```
 
-### MemoryPassport
+## Why It Exists
 
-Tracks claim content, caller-declared source, complete history, and review/dispute lifecycle under a stable `memoryId`.
+Multi-agent and coding-agent systems often pass values between tools, models, reviewers, and scripts. The hard part is not storing another object; it is keeping the handoff honest.
 
-```js
-new MemoryPassport().create({ memoryId: 'claim-1', actorAgentId: 'observer', content: { ok: true } });
-```
+CairnWeave keeps that boundary small and inspectable. It helps you record explicit producer labels, append order, claim revisions, and review/dispute state without introducing a service runtime or claiming more authority than the caller supplied.
 
-The state machine is `active -> disputed -> resolved`; both `requestReview()` and `dispute()` enter `disputed`.
+## Capability Layers
 
-## Coding agent integration
+| Layer | Use when you need | What it adds | What it does not do |
+| --- | --- | --- | --- |
+| Relay | A minimal handoff wrapper | Preserves `agentId`, `result`, and optional `url`/`model` | Does not infer identity or provenance |
+| `ResultStore` | Ordered results in one runtime | Append/read order inside a single store instance | Does not coordinate across processes or instances |
+| `MemoryPassport` | Claim lifecycle | Stable `memoryId`, cloned content, caller-declared source, history, review/dispute/resolution state | Does not persist claims or authenticate sources |
+| `ProjectMemory` | Project-scoped claim memory | Project membership, private-claim visibility, provenance-required writes, expiry, supersession, revisions, and an in-instance audit log | Does not provide storage, auth, network sync, or hidden import/replay |
 
-This library is designed for coding agents as well as direct application use. Agents should inspect the host, request authorization, choose the smallest layer, verify the integration, and provide a scoped rollback. Copy the [canonical recipe and handoff format](docs/AGENT_INTEGRATION.md).
+Choose the smallest layer that makes the handoff explicit enough for your workflow.
 
-The generic API is `captureAgentTask({ agentId, run, ... })`; `captureCommandTask({ command, args, ... })` supplies a dependency-free command adapter. The CLI equivalent is `bin/guard-agent-task.js`. Existing `captureCodexTask()` and `bin/guard-codex-task.js` behavior remain available for compatibility.
+## Typical Scenarios
 
-## Tools and design notes
+- Preserve an agent response with its declared producer before passing it to another step.
+- Keep ordered intermediate outputs from planner, implementer, reviewer, or verifier agents.
+- Track a claim through review, dispute, and resolution without mutating its earlier history.
+- Maintain project-scoped claims with visibility rules and an audit trail inside the current process.
+- Wrap a coding-agent or command execution flow with `captureAgentTask()` or `captureCommandTask()` and produce a reviewable artifact.
 
-- **API and context loader:** detailed examples, event semantics, source rules, and optional `loadBaseContext` usage are in [docs/API.md](docs/API.md).
-- **Asset verifier:** the local CLI validates supported Gene declarations with strict path and command boundaries; see [docs/ASSET_VERIFY.md](docs/ASSET_VERIFY.md).
-- **Memory Palace:** the proposed append-only persistence and hash-chain design is in [docs/MEMORY_PALACE.md](docs/MEMORY_PALACE.md).
+## Boundaries and Non-Goals
 
-## Development
+CairnWeave is intentionally small.
+
+- It is zero-dependency CommonJS for Node.js >=18.
+- It is in-process only.
+- It does not start a daemon.
+- It does not make network calls.
+- It does not persist data for you.
+- It does not authenticate identities, sources, or users.
+- It does not perform hidden file, shell, network, or database I/O.
+- It does not turn a digest into trust. `ProjectMemory` event-log digests are consistency checks over declared event ranges, not authentication.
+- It does not treat `ProjectMemory.validateEvents()` or `ProjectMemory.diagnoseEvents()` as replay, import, or authorization decisions. They validate or report diagnostics for event-log shape and consistency.
+
+## API Selection
+
+| If your question is... | Start with |
+| --- | --- |
+| "Can I forward this result without losing who the caller says produced it?" | `relayExternalResult()` |
+| "Can I keep a local sequence of agent outputs?" | `ResultStore` |
+| "Can I track the lifecycle of a claim?" | `MemoryPassport` |
+| "Can I keep project-scoped claims with visibility, revisions, expiry, and audit events?" | `ProjectMemory` |
+| "Can I capture a coding-agent task or command result for review?" | `captureAgentTask()` or `captureCommandTask()` |
+
+## Documentation
+
+- [API Reference and examples](docs/API.md)
+- [Coding-agent integration recipe](docs/AGENT_INTEGRATION.md)
+- [ProjectMemory guide](docs/PROJECT_MEMORY.md)
+- [Integrity verification notes](docs/INTEGRITY_VERIFICATION.md)
+- [Compatibility notes](COMPATIBILITY.md)
+- [Asset verifier](docs/ASSET_VERIFY.md)
+- [Memory Palace design note](docs/MEMORY_PALACE.md)
+
+## Development and Verification
+
+Run the test suite:
 
 ```sh
 npm test
+```
+
+Run the example:
+
+```sh
 npm run example
 ```
 
-See [`examples/basic.js`](examples/basic.js) for a runnable flow.
+See [`examples/basic.js`](examples/basic.js) for a runnable end-to-end flow.
+
+## Compatibility and Migration
+
+CairnWeave is the renamed package for the project previously published as **Agent Integrity Guard** / `agent-integrity-guard`.
+
+The old API surface, CLI filenames, and serialized schema identifiers remain supported for compatibility. New integrations should prefer the current package name and the generic agent/task APIs, while existing `captureCodexTask()` and `bin/guard-codex-task.js` usage can continue during migration.
+
+See [COMPATIBILITY.md](COMPATIBILITY.md) for the detailed migration notes.
 
 ## License
 

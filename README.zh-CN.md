@@ -1,85 +1,142 @@
-# Agent Integrity Guard
+# CairnWeave
 
-> **Coding Agent 入口：** 从本仓库接入最小合适层；修改依赖或生产路径前先询问，然后测试并报告改动、验证、回滚和限制。完整内容见[接入配方](docs/AGENT_INTEGRATION.md)。
->
-> English: [README.md](README.md)
+> **面向多 Agent 系统的 provenance fabric。**
 
-一个零依赖、进程内的 CommonJS 工具集，为 Agent 结果交接添加明确的生产者标签、顺序、claim 历史和裁决状态。
+English: [README.md](README.md)
 
-## 特性
+CairnWeave 是一个零依赖、进程内的 CommonJS 工具集，用来让 Agent 交接变得明确：谁产出了结果、交接了什么、顺序如何、处于什么复核状态。
 
-- **零依赖：** 在 Node.js 18+ 上运行，不需要运行时依赖包。
-- **进程内且无副作用：** 没有 daemon、网络、持久化、认证或隐藏 I/O。
-- **渐进式三件套：** 按需选择 Relay、`ResultStore` 或 `MemoryPassport`。
-- **显式 provenance：** 未知的 identity、model、URL 和 source 继续保持未知。
-- **防御性历史：** 值会被克隆，记录只追加，复核/争议转换受控。
-- **Agent 中立的任务捕获：** 通用核心与命令 adapter 不依赖 Codex，同时保留原 Codex 入口作为兼容 adapter。
+它运行在 Node.js >=18 上，没有 daemon、网络调用、持久化层、认证系统或隐藏 I/O。你只接入应用或 Coding Agent 工作流真正需要的原语。
 
-## 安装
+本项目原名 **Agent Integrity Guard**，包名为 `agent-integrity-guard`。既有 API、CLI 文件名和序列化 schema 标识继续兼容；见[兼容与迁移](#兼容与迁移)。
+
+## Quick Start
+
+安装：
 
 ```sh
-npm install agent-integrity-guard
+npm install cairnweave
 ```
 
-## 30 秒上手
+转发外部 Agent 结果，同时不编造缺失的 provenance：
 
 ```js
-const { relayExternalResult } = require('agent-integrity-guard');
-const relayed = relayExternalResult({
-  agentId: response.agentId, result: response.output, url: response.url
+const { relayExternalResult } = require('cairnweave');
+
+const handoff = relayExternalResult({
+  agentId: response.agentId,
+  result: response.output,
+  url: response.url
 });
 ```
 
-只转发调用方明确提供的字段；本库不会编造 identity 或 provenance。
+只保留调用方提供的字段。未知的 identity、model、URL 或 source 会继续保持未知。
 
-## 选择最小层
-
-### Relay
-
-忠实转发 `agentId`、`result` 以及可选的 `url`/`model`，适合只需如实保留字段的交接。
+需要有序交接时：
 
 ```js
-relayExternalResult({ agentId: 'planner', result: { ok: true } });
+const { ResultStore } = require('cairnweave');
+
+const store = new ResultStore();
+store.append('planner', { kind: 'plan' });
+store.append('builder', { kind: 'patch' });
 ```
 
-### ResultStore
-
-在单个 store 实例内增加追加/读取顺序。序号不跨实例或进程。
+需要 claim 历史时：
 
 ```js
-new ResultStore().append('planner', { kind: 'plan' });
+const { MemoryPassport } = require('cairnweave');
+
+const passport = new MemoryPassport();
+passport.create({
+  memoryId: 'claim-1',
+  actorAgentId: 'observer',
+  content: { status: 'checked' }
+});
 ```
 
-### MemoryPassport
+## 为什么存在
 
-用稳定的 `memoryId` 跟踪 claim 内容、调用方声明的 source、完整历史和复核/争议生命周期。
+多 Agent 和 Coding Agent 系统经常在工具、模型、reviewer 和脚本之间传递值。难点不只是再存一个对象，而是让交接保持诚实。
 
-```js
-new MemoryPassport().create({ memoryId: 'claim-1', actorAgentId: 'observer', content: { ok: true } });
-```
+CairnWeave 把这个边界做小、做清楚。它帮助你记录明确的生产者标签、追加顺序、claim revision 和复核/争议状态，同时不引入服务运行时，也不声称拥有调用方没有提供的权威。
 
-状态机是 `active -> disputed -> resolved`；`requestReview()` 和 `dispute()` 都会进入 `disputed`。
+## 能力分层
 
-## Coding Agent 接入
+| 层 | 适合在你需要... | 增加什么 | 不做什么 |
+| --- | --- | --- | --- |
+| Relay | 最小交接包装 | 保留 `agentId`、`result` 和可选 `url`/`model` | 不推断 identity 或 provenance |
+| `ResultStore` | 单个运行时内的有序结果 | 单个 store 实例内的 append/read 顺序 | 不跨进程或实例协调 |
+| `MemoryPassport` | Claim 生命周期 | 稳定 `memoryId`、克隆内容、调用方声明的 source、历史、复核/争议/解决状态 | 不持久化 claim，也不认证 source |
+| `ProjectMemory` | 项目范围内的 claim memory | 项目成员、私有 claim 可见性、强制 provenance 的写入、过期、替代、revision 和实例内审计日志 | 不提供存储、认证、网络同步或隐藏 import/replay |
 
-本库既面向 Coding Agent，也可由应用直接使用。Agent 应检查宿主、请求授权、选择最小层、验证接入并提供限定范围的回滚方案。复制使用[唯一接入配方与交接格式](docs/AGENT_INTEGRATION.md)。
+选择能让交接足够明确的最小层。
 
-通用 API 是 `captureAgentTask({ agentId, run, ... })`；`captureCommandTask({ command, args, ... })` 提供零依赖命令 adapter，对应 CLI 为 `bin/guard-agent-task.js`。既有 `captureCodexTask()` 和 `bin/guard-codex-task.js` 保持兼容。
+## 典型场景
 
-## 工具与设计说明
+- 在传给下一步之前，保留 Agent 响应及其声明的生产者。
+- 保存 planner、implementer、reviewer 或 verifier Agent 的有序中间输出。
+- 跟踪 claim 的复核、争议和解决过程，同时不改写早期历史。
+- 在当前进程内维护带可见性规则和审计轨迹的项目范围 claim。
+- 用 `captureAgentTask()` 或 `captureCommandTask()` 包装 Coding Agent 或命令执行流程，生成可复核 artifact。
 
-- **API 与 context loader：** 详细示例、事件语义、source 规则和可选 `loadBaseContext` 用法见 [docs/API.md](docs/API.md)。
-- **资产验证器：** 本地 CLI 在严格的路径和命令边界内验证受支持的 Gene 声明，见 [docs/ASSET_VERIFY.md](docs/ASSET_VERIFY.md)。
-- **Memory Palace：** append-only 持久化与 hash chain 的拟议设计见 [docs/MEMORY_PALACE.md](docs/MEMORY_PALACE.md)。
+## 边界与非目标
 
-## 开发
+CairnWeave 刻意保持小而明确。
+
+- 它是面向 Node.js >=18 的零依赖 CommonJS。
+- 它只在进程内运行。
+- 它不会启动 daemon。
+- 它不会发起网络调用。
+- 它不会替你持久化数据。
+- 它不会认证 identity、source 或 user。
+- 它不会执行隐藏的文件、shell、网络或数据库 I/O。
+- 它不会把 digest 变成信任。`ProjectMemory` event-log digest 是对声明事件范围的一致性检查，不是认证。
+- 它不会把 `ProjectMemory.validateEvents()` 或 `ProjectMemory.diagnoseEvents()` 当作 replay、import 或授权决策。它们只校验事件日志形状与一致性，或返回诊断。
+
+## API 选择
+
+| 如果你的问题是... | 从这里开始 |
+| --- | --- |
+| “能否转发这个结果，同时不丢失调用方声明的生产者？” | `relayExternalResult()` |
+| “能否保存一组本地有序的 Agent 输出？” | `ResultStore` |
+| “能否跟踪一个 claim 的生命周期？” | `MemoryPassport` |
+| “能否维护带可见性、revision、过期和审计事件的项目范围 claim？” | `ProjectMemory` |
+| “能否捕获 Coding Agent 任务或命令结果以便复核？” | `captureAgentTask()` 或 `captureCommandTask()` |
+
+## 文档导航
+
+- [API 参考与示例](docs/API.md)
+- [Coding Agent 接入配方](docs/AGENT_INTEGRATION.md)
+- [ProjectMemory 指南](docs/PROJECT_MEMORY.md)
+- [完整性验证说明](docs/INTEGRITY_VERIFICATION.md)
+- [兼容说明](COMPATIBILITY.md)
+- [资产验证器](docs/ASSET_VERIFY.md)
+- [Memory Palace 设计说明](docs/MEMORY_PALACE.md)
+
+## 开发验证
+
+运行测试：
 
 ```sh
 npm test
+```
+
+运行示例：
+
+```sh
 npm run example
 ```
 
-可运行流程见 [`examples/basic.js`](examples/basic.js)。
+可运行的端到端流程见 [`examples/basic.js`](examples/basic.js)。
+
+## 兼容与迁移
+
+CairnWeave 是原 **Agent Integrity Guard** / `agent-integrity-guard` 项目的新名称。
+
+旧 API surface、CLI 文件名和序列化 schema 标识会继续兼容。新接入建议使用当前包名和通用 agent/task API；既有 `captureCodexTask()` 与 `bin/guard-codex-task.js` 用法可以在迁移期继续保留。
+
+详细迁移说明见 [COMPATIBILITY.md](COMPATIBILITY.md)。
 
 ## License
 
