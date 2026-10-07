@@ -4,9 +4,9 @@
 
 中文：[README.zh-CN.md](README.zh-CN.md)
 
-CairnWeave is a zero-dependency, in-process CommonJS toolkit for making agent handoffs explicit: who produced a result, what was handed off, in what order, and what review state it is in.
+CairnWeave is a zero-dependency CommonJS foundation for explicit agent communication and provenance: wire-safe messages, transport-neutral envelopes and capabilities, plus in-process records of who produced a result, what was handed off, in what order, and what review state it is in.
 
-It runs on Node.js >=18 and has no daemon, network calls, persistence layer, authentication system, or hidden I/O. You choose only the primitive your application or coding-agent workflow needs.
+It runs on Node.js >=18 and has no daemon, network calls, persistence layer, authentication system, or hidden I/O. Its optional NDJSON adapter uses only streams explicitly injected by the caller.
 
 Previously published as **Agent Integrity Guard** / `agent-integrity-guard`. Existing APIs, CLI filenames, and serialized schema identifiers remain supported; see [Compatibility and Migration](#compatibility-and-migration).
 
@@ -65,6 +65,7 @@ CairnWeave keeps that boundary small and inspectable. It helps you record explic
 
 | Layer | Use when you need | What it adds | What it does not do |
 | --- | --- | --- | --- |
+| Protocol core | Agent communication contracts and caller-owned stream framing | JSON-wire-safe messages, envelopes, capability negotiation, correlation checks, and bounded NDJSON over injected streams | Does not provide a daemon, network service, authentication, retries, delivery acknowledgement, or MCP semantics |
 | Relay | A minimal handoff wrapper | Preserves `agentId`, `result`, and optional `url`/`model` | Does not infer identity or provenance |
 | `ResultStore` | Ordered results in one runtime | Append/read order inside a single store instance | Does not coordinate across processes or instances |
 | `MemoryPassport` | Claim lifecycle | Stable `memoryId`, cloned content, caller-declared source, history, review/dispute/resolution state | Does not persist claims or authenticate sources |
@@ -85,7 +86,7 @@ Choose the smallest layer that makes the handoff explicit enough for your workfl
 CairnWeave is intentionally small.
 
 - It is zero-dependency CommonJS for Node.js >=18.
-- It is in-process only.
+- Core state is in-process; the optional NDJSON adapter can use caller-injected stdio or pipe streams.
 - It does not start a daemon.
 - It does not make network calls.
 - It does not persist data for you.
@@ -107,6 +108,8 @@ CairnWeave is intentionally small.
 ## Documentation
 
 - [API Reference and examples](docs/API.md)
+- [Protocol core](docs/PROTOCOL.md)
+- [Protocol core（中文）](docs/PROTOCOL.zh-CN.md)
 - [Coding-agent integration recipe](docs/AGENT_INTEGRATION.md)
 - [ProjectMemory guide](docs/PROJECT_MEMORY.md)
 - [Integrity verification notes](docs/INTEGRITY_VERIFICATION.md)

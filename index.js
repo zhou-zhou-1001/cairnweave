@@ -9,6 +9,7 @@ const { captureCodexTask } = require('./bin/guard-codex-task');
 const { captureCommandTask } = require('./bin/guard-agent-task');
 const { saveArtifact, loadArtifact } = require('./artifact-store');
 const { ProjectMemory } = require('./project-memory');
+const protocol = require('./protocol');
 
 module.exports = {
   BASE_CONTEXT_FILES,
@@ -27,5 +28,10 @@ module.exports = {
 // Keep the legacy enumerable export surface stable while exposing the Phase 1 API.
 Object.defineProperty(module.exports, 'ProjectMemory', {
   value: ProjectMemory,
+  enumerable: false
+});
+
+Object.defineProperty(module.exports, 'protocol', {
+  value: Object.freeze(protocol),
   enumerable: false
 });

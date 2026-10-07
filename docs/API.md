@@ -2,7 +2,11 @@
 
 CairnWeave is a dependency-free, in-process CommonJS correctness layer. It does not persist, transmit, authenticate, authorize, or sign data. Root exports also include the generic task APIs `captureAgentTask`, `captureCommandTask`, and `resolveCapturedTask`; `captureCodexTask` is retained for compatibility.
 
+The protocol API is exposed at `require('cairnweave/protocol')` and as the non-enumerable `require('cairnweave').protocol` namespace. It includes the bounded injected-stream NDJSON adapter. See [Protocol Core](PROTOCOL.md).
+
 CairnWeave 是零依赖、进程内的 CommonJS 正确性层。它不持久化、传输、认证、授权或签名数据。根导出还包括通用任务 API `captureAgentTask`、`captureCommandTask`、`resolveCapturedTask`；`captureCodexTask` 继续作为兼容 API。
+
+协议 API 位于 `require('cairnweave/protocol')`，也可通过不可枚举的 `require('cairnweave').protocol` 使用，其中包含有界的注入 stream NDJSON adapter。参见[中文协议文档](PROTOCOL.zh-CN.md)。
 
 ### Guarded task capture
 

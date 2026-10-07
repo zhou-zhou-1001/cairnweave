@@ -4,9 +4,9 @@
 
 English: [README.md](README.md)
 
-CairnWeave 是一个零依赖、进程内的 CommonJS 工具集，用来让 Agent 交接变得明确：谁产出了结果、交接了什么、顺序如何、处于什么复核状态。
+CairnWeave 是一个零依赖的 CommonJS Agent 通信与溯源基础层：提供 wire-safe 消息、transport-neutral envelope 与 capability，并显式记录谁产出了结果、交接了什么、顺序如何、当前处于什么复核状态。
 
-它运行在 Node.js >=18 上，没有 daemon、网络调用、持久化层、认证系统或隐藏 I/O。你只接入应用或 Coding Agent 工作流真正需要的原语。
+它运行在 Node.js >=18 上，没有 daemon、网络调用、持久化层、认证系统或隐藏 I/O。可选 NDJSON adapter 只使用调用方明确注入的 stream。
 
 本项目原名 **Agent Integrity Guard**，包名为 `agent-integrity-guard`。既有 API、CLI 文件名和序列化 schema 标识继续兼容；见[兼容与迁移](#兼容与迁移)。
 
@@ -65,6 +65,7 @@ CairnWeave 把这个边界做小、做清楚。它帮助你记录明确的生产
 
 | 层 | 适合在你需要... | 增加什么 | 不做什么 |
 | --- | --- | --- | --- |
+| Protocol core | Agent 通信合约与调用方持有的 stream framing | JSON wire-safe 消息、envelope、capability 协商、correlation 校验及有界 NDJSON | 不提供 daemon、网络服务、认证、重试、交付确认或 MCP 语义 |
 | Relay | 最小交接包装 | 保留 `agentId`、`result` 和可选 `url`/`model` | 不推断 identity 或 provenance |
 | `ResultStore` | 单个运行时内的有序结果 | 单个 store 实例内的 append/read 顺序 | 不跨进程或实例协调 |
 | `MemoryPassport` | Claim 生命周期 | 稳定 `memoryId`、克隆内容、调用方声明的 source、历史、复核/争议/解决状态 | 不持久化 claim，也不认证 source |
@@ -85,7 +86,7 @@ CairnWeave 把这个边界做小、做清楚。它帮助你记录明确的生产
 CairnWeave 刻意保持小而明确。
 
 - 它是面向 Node.js >=18 的零依赖 CommonJS。
-- 它只在进程内运行。
+- 核心状态只在进程内；可选 NDJSON adapter 可使用调用方注入的 stdio 或 pipe。
 - 它不会启动 daemon。
 - 它不会发起网络调用。
 - 它不会替你持久化数据。
@@ -107,6 +108,8 @@ CairnWeave 刻意保持小而明确。
 ## 文档导航
 
 - [API 参考与示例](docs/API.md)
+- [Protocol core（中文）](docs/PROTOCOL.zh-CN.md)
+- [Protocol core (English)](docs/PROTOCOL.md)
 - [Coding Agent 接入配方](docs/AGENT_INTEGRATION.md)
 - [ProjectMemory 指南](docs/PROJECT_MEMORY.md)
 - [完整性验证说明](docs/INTEGRITY_VERIFICATION.md)

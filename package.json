@@ -4,7 +4,10 @@
   "description": "The provenance fabric for multi-agent systems.",
   "main": "index.js",
   "type": "commonjs",
-  "exports": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./protocol": "./protocol/index.js"
+  },
   "files": [
     "index.js",
     "context-loader.js",
@@ -13,6 +16,7 @@
     "result-store.js",
     "artifact-store.js",
     "project-memory.js",
+    "protocol/",
     "core/",
     "bin/",
     "docs/",
